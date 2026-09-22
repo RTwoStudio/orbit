@@ -1,0 +1,79 @@
+---
+Issue-ID: 7
+Status: Draft
+Created: 2026-09-22T00:00:00Z
+Registry-Version: 0.1.0
+Locked-At:
+Lock-Hash:
+---
+
+# Plan: Golden issue
+
+> **Status governs editing.**
+> While `Status: Draft`: this plan is built interactively during `/plan` —
+> the Agent asks, the Orchestrator decides. The Agent never dumps a finished
+> document; it works section by section through the Q&A, proposing each
+> entry via the question tool before writing it.
+> Never touch anything above the `---` frontmatter delimiter: the CLI owns
+> `Status`, `Locked-At`, and `Lock-Hash`.
+> Once `Status: Locked` (set by `orbit neocortex plan lock`): this file is
+> IMMUTABLE. Any structural change MUST go through an official Addenda
+> (`/addenda`) — never direct edits. Non-structural context goes to
+> `notes/` — not here.
+
+## Architectural Decisions
+
+<!-- Agent: Every RESOLVED decision from the interactive Q&A, one per bullet.
+Format exactly: `- **Q: <the question you asked>** → **<the Orchestrator's
+choice>** — <one-line rationale>`. Keep each entry to 1–2 lines. Do not
+write paragraphs. A decision still under discussion does NOT belong here
+yet — park it in Open Questions. Propose each entry to the Orchestrator
+before writing it. -->
+
+## Open Questions
+
+<!-- Agent: Decision questions you must ask the Orchestrator before the plan
+can lock. One checkbox per question, most critical first. When the
+Orchestrator answers, move the resolved question up to Architectural
+Decisions in Q → A form and remove it from here. The plan may NOT lock
+while any question remains open — `orbit neocortex plan lock` refuses. -->
+
+- [ ] 
+
+## Detail
+
+<!-- Free-form section — NO bounds, NO structure imposed. Rough notes,
+constraints discovered mid-conversation, links, performance budgets,
+half-formed ideas — anything that does not fit the sections above.
+The Agent and Orchestrator both append here as-is. After lock, new
+non-structural context goes to `notes/`, not here. -->
+
+## Task DAG
+
+<!-- Agent: One task per line. Format:
+`- [T1] Task name (Blocked by: None)`
+`- [T2] Task name (Blocked by: T1) — related: T5 controller, T1 seeds`
+
+Rules:
+- `(Blocked by: ...)` is the ONLY machine-parsed field — the CLI builds the
+  DAG and derives every task's `dependsOn` from it.
+- Never write "Blocks" — it is the computed inverse of Blocked By
+  (T2 blocked by T1 ⇒ T1 blocks T2). Maintaining both invites drift;
+  `orbit neocortex status` renders edges in both directions.
+- Everything after ` — ` is optional, UNPARSED context for humans and the
+  Worker Agent (which task touches whose code, and why). Keep it short.
+- Keep each task small enough for one JIT execution loop. Order MUST be a
+  valid topological order of the dependencies.
+- This list is the source of truth for `orbit neocortex task new` order.
+  Appended or changed tasks arrive here ONLY via an applied addenda
+  (`/addenda` → `/addenda apply <N>`) — the CLI amends this list, never
+  the Agent. Tasks created from addenda carry `Origin: addenda-N` in their
+  frontmatter; originals carry `Origin: plan`.
+- Propose the full list to the Orchestrator for approval before writing. -->
+
+## Amendments
+
+<!-- CLI-owned. One line per applied addenda, appended by
+`orbit neocortex addenda apply`. Never edited by hand or by an Agent.
+Provenance rule: a task ID appearing here but not in the original Task DAG
+was introduced by that addenda. -->

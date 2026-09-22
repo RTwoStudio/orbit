@@ -1,0 +1,12 @@
+registry:
+  url: ""
+  ref: main
+  token_env: ORBIT_REGISTRY_TOKEN
+opencode:
+  dir: ~/.config/opencode
+neocortex:
+  dir: .neocortex
+vault:
+  dir: ~/.orbit-vault
+ui:
+  color: auto

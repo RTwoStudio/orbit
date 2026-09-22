@@ -1,0 +1,58 @@
+---
+Issue-ID: {{ISSUE_ID}}
+Addenda: {{ADDENDA_NUM}}
+Status: Draft
+Created: {{DATE}}
+Registry-Version: {{REGISTRY_VERSION}}
+Applied-At:
+---
+
+# Addenda {{ADDENDA_NUM}}: {{ADDENDA_TITLE}}
+
+> **Course correction record.** The locked `01-plan.md` is never edited by
+> an Agent — every structural change is recorded here first, approved by the
+> Orchestrator, then applied by `orbit neocortex addenda apply` (which
+> validates the delta against the current plan, amends it, and re-locks the
+> hash). This file is append-only history once applied. Never touch anything
+> above the `---` frontmatter delimiter.
+
+## Reasoning
+
+<!-- Agent: Why is the locked plan changing? What new information, blocked
+discovery, or requirement shift triggered this? Ask the Orchestrator about
+the pivot before writing. Propose the text; write only after approval.
+Small pivots are fine — one line per section. Ceremony scales with blast
+radius, not with the number of addenda. -->
+
+## Impact Analysis
+
+<!-- Agent: Analyze the effect on the locked plan BEFORE proposing changes.
+Cover: affected tasks, new work introduced, work removed, dependency
+changes, and risks introduced by the pivot. Propose to the Orchestrator
+first; write only after approval. -->
+
+## Plan Changes
+
+<!-- Agent: The exact task-matrix delta, one line per change. Format:
+`- ADD [T5] Task name (Blocked by: T2)`
+`- REMOVE [T3] Task name — <reason>`
+`- MODIFY [T2] Task name — <what changes>`
+
+Rules:
+- ADD: ID must not exist in the current effective DAG.
+- REMOVE / MODIFY: ID must exist.
+- MODIFY changes the task line in place (name, dependencies, context) —
+  state the full new line in <what changes> where possible.
+- After apply, the plan's Task DAG must remain a valid topological order —
+  `addenda apply` refuses otherwise.
+- On apply, the CLI rewrites the plan DAG, appends the plan's Amendments
+  line, and stamps Origin/Amendments in every touched task file.
+- Propose the delta to the Orchestrator first; write only after approval. -->
+
+## Orchestrator Approval
+
+<!-- Human: tick this box ONLY after reviewing Reasoning, Impact, and Plan
+Changes in the TUI. The Agent must never tick it. `addenda apply` refuses
+while this box is unticked. -->
+
+- [ ] Approved by Orchestrator — Date:

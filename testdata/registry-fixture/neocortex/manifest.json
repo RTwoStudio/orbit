@@ -1,0 +1,31 @@
+{
+  "version": "0.1.0",
+  "layout": 1,
+  "files": {
+    "root": [
+    { "path": "NEOCORTEX.md", "sha256": "8f3d7bf9f5988544ae94d680cc257b286b61725d898bf5c704c6ec8f0e090812" }
+    ],
+    "stubs": [
+    { "path": "stubs/00-concept.stub.md", "sha256": "fe086ca6f32f8e7375b10187deea52ce38d071d3baa8c41cb1db4149ab2b1d9b" },
+    { "path": "stubs/01-plan.stub.md", "sha256": "0d66d10cd3e8569091c3858e9512057f045edde9fb023be8287672a182fd8b0a" },
+    { "path": "stubs/addenda.stub.md", "sha256": "70e5f3869220217f7bd0cc1264abe1151cfa86726e6caf90a951be6e92410a48" },
+    { "path": "stubs/task.stub.md", "sha256": "8a85714282e75d5642c5d22cf309179cb525491b909a5b3841e80508cb2e2181" }
+    ],
+    "opencode": {
+      "agents": [
+    { "path": "opencode/agents/neocortex.md", "sha256": "5b66b98dc3c28a5b4eb80790fc896b185599572532291bbd64e8c50a171e642f" },
+    { "path": "opencode/agents/neocortex-planner.md", "sha256": "97ba227afd0ee3db03f359364992d9cb600426da6fa146779ecf9e722937d43a" },
+    { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "17f8f287a8d453deb0c680a0f32e3da0f5e255a658c6ee46651ceba47232dc5c" },
+    { "path": "opencode/agents/neocortex-implementer.md", "sha256": "e031448cfb63ba1cd8360b599a9b77b3dc7b4ea326b21f8a03486c6aa0d7a502" }
+      ],
+      "commands": [
+    { "path": "opencode/commands/issue.md", "sha256": "ed72b2283cf51ea11d17f6eab875468868b322d6bdbd1e1962e9425a02d868e1" },
+    { "path": "opencode/commands/plan.md", "sha256": "1ca103b5526b1e3bbc0b5067d0890b85f82e79fb6f820702a74635426f343dc0" },
+    { "path": "opencode/commands/new-task.md", "sha256": "da68bdb7f68c31a9d039845138417989ae436e695b2dc3759bb53dc8980f08ab" },
+    { "path": "opencode/commands/implement.md", "sha256": "d0c11736509778efa599ac945eee290787be0ebad52624d0731dbefb61d05d82" },
+    { "path": "opencode/commands/addenda.md", "sha256": "36a256151e4d8312b0fb15a034401c6293e9ec94d89992ad88194caa0c3d8a25" },
+    { "path": "opencode/commands/close.md", "sha256": "c49567f401d131c11910eb95acd830c10827e28fafba444d0ebda9ab7be16009" }
+      ]
+    }
+  }
+}

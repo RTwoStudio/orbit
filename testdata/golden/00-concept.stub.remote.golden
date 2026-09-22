@@ -1,0 +1,59 @@
+---
+Issue-ID: 7
+Status: Draft
+Created: 2026-09-22T00:00:00Z
+Source: remote:https://github.com/acme/repo/issues/7
+Registry-Version: 0.1.0
+Locked-At:
+Lock-Hash:
+---
+
+# Concept: Golden issue
+
+> **Status governs editing:**
+> While `Status: Draft`: the assigned agent may fill Objective, Detail (only
+> when Source is `interactive`), Requirements, and Scope & Boundaries — by
+> replacing the `<!-- Agent: ... -->` placeholders. Every proposed value must
+> be approved by the Orchestrator via the question tool before it is written.
+> Never touch anything above the `---` frontmatter delimiter: the CLI owns
+> `Status`, `Locked-At`, and `Lock-Hash`.
+> Once `Status: Locked` (set by `orbit neocortex issue lock`): this file is
+> IMMUTABLE. If requirements change mid-run, record it via
+> `orbit neocortex addenda new` — never edit this file.
+
+## Objective
+
+<!-- Agent: Write the "what & why" in one or two sentences. What problem does
+this feature solve, and what must be true when it is done? Keep it short —
+the depth belongs in Detail below. Propose it to the Orchestrator first;
+write only after approval. -->
+
+## Detail
+
+<!-- Free-form section — NO bounds, NO structure imposed. This is the
+verbatim feature input: screenshots links, stack traces, user stories,
+diagrams, API examples, background research, anything. The Agent reads this
+as-is. Injected verbatim by `orbit neocortex issue new` for remote/file
+sources; written by the Agent (verbatim from the conversation, no
+embellishment) for interactive sources. -->
+
+remote body
+
+## Requirements
+
+<!-- Agent: Distill the concrete must-haves from the Detail — one checkable
+statement per line. Propose them to the Orchestrator for approval before
+writing. If the Detail is already explicit enough, copy its statements
+directly. Leave empty if the Detail is self-explanatory. -->
+
+- [ ] 
+- [ ] 
+
+## Scope & Boundaries
+
+<!-- Agent: Propose explicit in-scope / out-of-scope statements to the
+Orchestrator for approval. Leave a bullet empty if the Detail above is
+complete and self-contained. -->
+
+- **In scope:**
+- **Out of scope:**
