@@ -2,6 +2,7 @@
 description: Interactive architecture planner — builds 01-plan.md through Q&A with the Orchestrator, then locks it; also handles official addenda
 mode: subagent
 permission:
+  question: allow
   edit:
     "*": deny
     ".neocortex/**": allow

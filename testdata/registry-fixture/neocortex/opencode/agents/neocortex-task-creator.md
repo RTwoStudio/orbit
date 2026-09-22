@@ -2,6 +2,7 @@
 description: Scaffolds one task via orbit-cli and interactively fills its placeholders using the question tool
 mode: subagent
 permission:
+  question: allow
   edit:
     "*": deny
     ".neocortex/**": allow

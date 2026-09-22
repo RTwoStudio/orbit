@@ -2,6 +2,7 @@
 description: NeoCortex Orchestrator — enforces the protocol, routes to specialized subagents, never writes code
 mode: primary
 permission:
+   question: allow
    task:
       "*": deny
       "neocortex-*": allow

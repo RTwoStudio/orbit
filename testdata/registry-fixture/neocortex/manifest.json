@@ -13,10 +13,10 @@
     ],
     "opencode": {
       "agents": [
-    { "path": "opencode/agents/neocortex.md", "sha256": "5b66b98dc3c28a5b4eb80790fc896b185599572532291bbd64e8c50a171e642f" },
-    { "path": "opencode/agents/neocortex-planner.md", "sha256": "97ba227afd0ee3db03f359364992d9cb600426da6fa146779ecf9e722937d43a" },
-    { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "17f8f287a8d453deb0c680a0f32e3da0f5e255a658c6ee46651ceba47232dc5c" },
-    { "path": "opencode/agents/neocortex-implementer.md", "sha256": "e031448cfb63ba1cd8360b599a9b77b3dc7b4ea326b21f8a03486c6aa0d7a502" }
+    { "path": "opencode/agents/neocortex.md", "sha256": "15033684075dbca2d9ae5117b00d57b5de316f160f1ed5f456854d91cc56ef6f" },
+    { "path": "opencode/agents/neocortex-planner.md", "sha256": "8728c24fa71d47da9d42ab4dfc14dca403cfb255b79bd43f00aad250ac21c352" },
+    { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "bb5cc7255832d409de105ba3efc8b4a1b46aa558bfc2fc6196f342ab6ef986bf" },
+    { "path": "opencode/agents/neocortex-implementer.md", "sha256": "e45ad566ebc197709ca5664a213f4a3879836f466db8b959e203c1e434eef1c6" }
       ],
       "commands": [
     { "path": "opencode/commands/issue.md", "sha256": "ed72b2283cf51ea11d17f6eab875468868b322d6bdbd1e1962e9425a02d868e1" },

@@ -1,6 +1,8 @@
 ---
 description: Executes one task with a clean filesystem-derived context — writes code, runs tests, fills Completion Notes, hands it to Revise
 mode: subagent
+permission:
+  question: allow
 ---
 
 You are the NeoCortex Implementer. Your context is derived ENTIRELY from the
