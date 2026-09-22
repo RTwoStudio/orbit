@@ -81,7 +81,7 @@ repo, verifies the sha256 checksum, and:
 - seeds `~/.config/orbit/config.json` (only if no config exists yet)
 
 Releases are cut by pushing a `v*` tag: `.github/workflows/release.yml`
-builds linux/darwin × amd64/arm64 tarballs + `checksums.txt` and attaches
+builds linux × amd64/arm64 tarballs + `checksums.txt` and attaches
 them to the GitHub Release.
 
 ## Configuration

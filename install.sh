@@ -27,8 +27,8 @@ die() { log "error: $*"; exit 1; }
 os="$(uname -s)"
 case "$os" in
   Linux)  os=linux  ;;
-  Darwin) os=darwin ;;
-  *) die "unsupported OS: $os (supported: linux, darwin)" ;;
+  Darwin) die "macOS is not supported yet (v0.1.0 ships linux only)" ;;
+  *) die "unsupported OS: $os (supported: linux)" ;;
 esac
 arch="$(uname -m)"
 case "$arch" in
