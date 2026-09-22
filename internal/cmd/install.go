@@ -8,14 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/orbit-sh/orbit-cli/internal/config"
-	"github.com/orbit-sh/orbit-cli/internal/deploy"
-	"github.com/orbit-sh/orbit-cli/internal/exit"
-	"github.com/orbit-sh/orbit-cli/internal/fsutil"
-	"github.com/orbit-sh/orbit-cli/internal/logx"
-	"github.com/orbit-sh/orbit-cli/internal/neocortex"
-	"github.com/orbit-sh/orbit-cli/internal/prompt"
-	"github.com/orbit-sh/orbit-cli/internal/registry"
+	"github.com/RTwoStudio/orbit-cli/internal/config"
+	"github.com/RTwoStudio/orbit-cli/internal/deploy"
+	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
+	"github.com/RTwoStudio/orbit-cli/internal/logx"
+	"github.com/RTwoStudio/orbit-cli/internal/neocortex"
+	"github.com/RTwoStudio/orbit-cli/internal/prompt"
+	"github.com/RTwoStudio/orbit-cli/internal/registry"
 )
 
 // StepReport is one row of the install/update summary table.

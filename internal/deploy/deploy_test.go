@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orbit-sh/orbit-cli/internal/registry"
+	"github.com/RTwoStudio/orbit-cli/internal/registry"
 )
 
 func TestTargetPathMapping(t *testing.T) {

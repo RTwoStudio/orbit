@@ -2,7 +2,7 @@
 package main
 
 import (
-	"github.com/orbit-sh/orbit-cli/internal/cmd"
+	"github.com/RTwoStudio/orbit-cli/internal/cmd"
 )
 
 func main() {

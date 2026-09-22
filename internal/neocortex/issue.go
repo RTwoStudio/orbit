@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orbit-sh/orbit-cli/internal/exit"
-	"github.com/orbit-sh/orbit-cli/internal/fsutil"
-	"github.com/orbit-sh/orbit-cli/internal/logx"
-	"github.com/orbit-sh/orbit-cli/internal/registry"
+	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
+	"github.com/RTwoStudio/orbit-cli/internal/logx"
+	"github.com/RTwoStudio/orbit-cli/internal/registry"
 )
 
 // IssueSource selects the Detail injection mode for issue new.

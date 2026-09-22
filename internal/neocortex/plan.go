@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orbit-sh/orbit-cli/internal/exit"
-	"github.com/orbit-sh/orbit-cli/internal/logx"
+	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit-cli/internal/logx"
 )
 
 // LockPlan performs plan lock (§5.8): concept hash verify FIRST (tamper

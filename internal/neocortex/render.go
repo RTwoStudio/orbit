@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/orbit-sh/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit-cli/internal/exit"
 )
 
 // tokenRe matches {{UPPER_SNAKE}} tokens.

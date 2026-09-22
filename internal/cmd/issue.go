@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/orbit-sh/orbit-cli/internal/config"
-	"github.com/orbit-sh/orbit-cli/internal/exit"
-	"github.com/orbit-sh/orbit-cli/internal/neocortex"
+	"github.com/RTwoStudio/orbit-cli/internal/config"
+	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit-cli/internal/neocortex"
 )
 
 func newIssueCmd() *cobra.Command {

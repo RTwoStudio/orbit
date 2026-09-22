@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/orbit-sh/orbit-cli/internal/registry"
+	"github.com/RTwoStudio/orbit-cli/internal/registry"
 )
 
 // runManifest regenerates manifest.json for a fixture repo with the given

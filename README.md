@@ -109,6 +109,28 @@ Private registries: set the env var named by `token_env` (e.g. `export
 ORBIT_REGISTRY_TOKEN=ghp_…`). It is used for authenticated `git clone` and
 API tarball downloads; the token value is never logged or stored.
 
+## License
+
+[Apache-2.0](LICENSE) with an attribution requirement — the same spirit as
+OSM's model: **use it freely, but say you use it.** Any redistribution of
+orbit (binaries, forks, or products embedding it) must keep the
+[NOTICE](NOTICE) file naming RTwo Studio (License §4(d)). The NOTICE file
+is the OSI-approved enforcement of "powered by orbit" — no open-source
+license can mandate UI badges, but this one makes the credit legally
+non-removable.
+
+## Registry access
+
+The asset registry (`RTwoStudio/orbit-registry`) is **private until v1.0.0**.
+Until then, users need a read-only fine-grained GitHub PAT:
+
+```sh
+export ORBIT_REGISTRY_TOKEN=github_pat_…   # read-only Contents on orbit-registry
+```
+
+The token is used for authenticated clone/tarball fetches and is never
+logged or stored (see `token_env` in Configuration).
+
 ## Exit codes
 
 | Code | Name | Meaning |
