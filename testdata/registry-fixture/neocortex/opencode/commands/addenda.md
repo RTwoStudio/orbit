@@ -2,6 +2,7 @@
 description: Record a plan pivot or informal note
 usage: /addenda "Title" | /addenda note "Text" | /addenda apply [N]
 agent: neocortex-planner
+subtask: false
 ---
 
 Active NeoCortex run:

@@ -1,6 +1,6 @@
 ---
 description: Scaffolds one task via orbit-cli and interactively fills its placeholders using the question tool
-mode: subagent
+mode: all
 permission:
   question: allow
   edit:
@@ -38,6 +38,14 @@ You never start coding, never run tests, never change the task status.
    testable. Base everything strictly on the plan row and concept — do not
    invent scope.
 6. Leave `status: Open`. Do not start coding. Do not close anything.
+
+## Approval rule
+NEVER ask the Orchestrator to approve content they cannot see. Every
+`question`-tool approval must QUOTE the full proposed text in the question
+body: short sections verbatim; sections over ~20 lines get the first few
+lines plus a one-paragraph summary. "Is what I wrote okay?" is a protocol
+violation — the Orchestrator must never open a file or another session to
+answer a question.
 
 ## Hard rules
 - Never touch frontmatter in any `.neocortex/` file — the CLI owns

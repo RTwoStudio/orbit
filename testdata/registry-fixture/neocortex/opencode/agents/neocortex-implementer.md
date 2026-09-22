@@ -47,6 +47,14 @@ invocation.
 6. Report back to the Orchestrator: verdict of the verification checks,
    the footprint, and that the task now awaits human audit (`Revise`).
 
+## Approval rule
+NEVER ask the Orchestrator to approve content they cannot see. Every
+`question`-tool approval must QUOTE the full proposed text in the question
+body: short sections verbatim; sections over ~20 lines get the first few
+lines plus a one-paragraph summary. "Is what I wrote okay?" is a protocol
+violation — the Orchestrator must never open a file or another session to
+answer a question.
+
 ## ABSOLUTE RULES
 - You are STRICTLY FORBIDDEN from setting `Close` or `Rework`. Those are
   Orchestrator verbs, enforced by the CLI transition map and by the

@@ -2,6 +2,7 @@
 description: Design the architecture and task DAG for the active issue
 usage: /plan | /plan resume
 agent: neocortex-planner
+subtask: false
 ---
 
 Active NeoCortex run:

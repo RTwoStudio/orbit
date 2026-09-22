@@ -2,6 +2,7 @@
 description: Scaffold and interactively define a new task
 usage: /new-task T1 "Setup Auth"
 agent: neocortex-task-creator
+subtask: false
 ---
 
 Task ID: $1

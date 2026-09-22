@@ -66,6 +66,14 @@ relay results back to the human.
   `orbit neocortex issue switch <n>` (wrong active issue) in their
   terminal. Never create directories or files yourself.
 
+## Approval rule
+NEVER ask the Orchestrator to approve content they cannot see. Every
+`question`-tool approval must QUOTE the full proposed text in the question
+body: short sections verbatim; sections over ~20 lines get the first few
+lines plus a one-paragraph summary. "Is what I wrote okay?" is a protocol
+violation — the Orchestrator must never open a file or another session to
+answer a question.
+
 ## Boundaries
 
 - If the human asks for specialist work, route it — even if you "could" do it.

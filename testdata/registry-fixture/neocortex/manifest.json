@@ -13,17 +13,17 @@
     ],
     "opencode": {
       "agents": [
-    { "path": "opencode/agents/neocortex.md", "sha256": "47e6984884701354f09d5ae73efa4a0cfa10adf984fb180121720a0bc281c708" },
-    { "path": "opencode/agents/neocortex-planner.md", "sha256": "8728c24fa71d47da9d42ab4dfc14dca403cfb255b79bd43f00aad250ac21c352" },
-    { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "bb5cc7255832d409de105ba3efc8b4a1b46aa558bfc2fc6196f342ab6ef986bf" },
-    { "path": "opencode/agents/neocortex-implementer.md", "sha256": "e45ad566ebc197709ca5664a213f4a3879836f466db8b959e203c1e434eef1c6" }
+    { "path": "opencode/agents/neocortex.md", "sha256": "3e7b8577b8f2804b1ad411f8b7215e0f298d2bd4fe4ee7e9197ff78ef01636aa" },
+    { "path": "opencode/agents/neocortex-planner.md", "sha256": "b3899af6c0cd5ff686e256f108251be7fe8a29a6e47ee4dfc0106be18caf95db" },
+    { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "da3da0b93cafb23d3ef61614146b7df907e8500dc3599193753117fb878d8d54" },
+    { "path": "opencode/agents/neocortex-implementer.md", "sha256": "4811fe31bd1318a717cf8637182cf4df16a475570bf85b7a1331fe6d9fe28944" }
       ],
       "commands": [
     { "path": "opencode/commands/issue.md", "sha256": "ed72b2283cf51ea11d17f6eab875468868b322d6bdbd1e1962e9425a02d868e1" },
-    { "path": "opencode/commands/plan.md", "sha256": "1ca103b5526b1e3bbc0b5067d0890b85f82e79fb6f820702a74635426f343dc0" },
-    { "path": "opencode/commands/new-task.md", "sha256": "da68bdb7f68c31a9d039845138417989ae436e695b2dc3759bb53dc8980f08ab" },
+    { "path": "opencode/commands/plan.md", "sha256": "d4fb0d4235c01bfe63f107031176f473a8fb6eb8b055a4ad0264550217edf094" },
+    { "path": "opencode/commands/new-task.md", "sha256": "6256bd1dfbeb3443e4a04869ef6ecd1a482f72ca1d737eb16aadd67dd11b2d14" },
     { "path": "opencode/commands/implement.md", "sha256": "d0c11736509778efa599ac945eee290787be0ebad52624d0731dbefb61d05d82" },
-    { "path": "opencode/commands/addenda.md", "sha256": "36a256151e4d8312b0fb15a034401c6293e9ec94d89992ad88194caa0c3d8a25" },
+    { "path": "opencode/commands/addenda.md", "sha256": "593b12caaf92b1467d265e48d8d4e5af2552f39037ca9b56d94bbd6c67a8912a" },
     { "path": "opencode/commands/close.md", "sha256": "c49567f401d131c11910eb95acd830c10827e28fafba444d0ebda9ab7be16009" }
       ]
     }
