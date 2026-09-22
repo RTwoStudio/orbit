@@ -13,7 +13,7 @@
     ],
     "opencode": {
       "agents": [
-    { "path": "opencode/agents/neocortex.md", "sha256": "15033684075dbca2d9ae5117b00d57b5de316f160f1ed5f456854d91cc56ef6f" },
+    { "path": "opencode/agents/neocortex.md", "sha256": "47e6984884701354f09d5ae73efa4a0cfa10adf984fb180121720a0bc281c708" },
     { "path": "opencode/agents/neocortex-planner.md", "sha256": "8728c24fa71d47da9d42ab4dfc14dca403cfb255b79bd43f00aad250ac21c352" },
     { "path": "opencode/agents/neocortex-task-creator.md", "sha256": "bb5cc7255832d409de105ba3efc8b4a1b46aa558bfc2fc6196f342ab6ef986bf" },
     { "path": "opencode/agents/neocortex-implementer.md", "sha256": "e45ad566ebc197709ca5664a213f4a3879836f466db8b959e203c1e434eef1c6" }
