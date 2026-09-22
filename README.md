@@ -66,6 +66,24 @@ error — leftovers are never rendered silently. The `<!-- Agent: ... -->`
 block marks agent-owned fill-ins; the CLI refuses to lock any artifact that
 still contains one.
 
+## Installation
+
+```sh
+curl -fsSL https://rtwostudio.ir/install.sh | bash
+```
+
+The installer detects OS/arch, resolves the latest GitHub Release of this
+repo, verifies the sha256 checksum, and:
+
+- **no `orbit` binary** → installs it to `~/.local/bin`
+- **older binary** → updates it to the latest release
+- **same/newer binary** → leaves it untouched
+- seeds `~/.config/orbit/config.json` (only if no config exists yet)
+
+Releases are cut by pushing a `v*` tag: `.github/workflows/release.yml`
+builds linux/darwin × amd64/arm64 tarballs + `checksums.txt` and attaches
+them to the GitHub Release.
+
 ## Configuration
 
 `~/.config/orbit/config.yml` (overridable via `--config` / `ORBIT_CONFIG`):

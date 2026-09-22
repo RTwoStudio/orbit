@@ -66,3 +66,33 @@ func TestHomeExpansion(t *testing.T) {
 		t.Errorf("relative path preserved: %q", cfg.NeoCortex.Dir)
 	}
 }
+
+func TestConfigJSONIsPickedUp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ORBIT_CONFIG", "")
+	t.Setenv("ORBIT_REGISTRY_URL", "")
+	base := filepath.Join(home, ".config", "orbit")
+	os.MkdirAll(base, 0o755)
+	// JSON is valid YAML — the loader must accept config.json.
+	os.WriteFile(filepath.Join(base, "config.json"),
+		[]byte(`{"registry": {"url": "https://json.example/reg", "ref": "dev"}}`), 0o644)
+
+	p := UserPath("")
+	if filepath.Base(p) != "config.json" {
+		t.Fatalf("UserPath should select config.json, got %q", p)
+	}
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Registry.URL != "https://json.example/reg" || cfg.Registry.Ref != "dev" {
+		t.Errorf("json config not parsed: %+v", cfg.Registry)
+	}
+
+	// config.yml wins when both exist.
+	os.WriteFile(filepath.Join(base, "config.yml"), []byte("registry:\n  url: yml\n"), 0o644)
+	if filepath.Base(UserPath("")) != "config.yml" {
+		t.Error("config.yml should win over config.json")
+	}
+}

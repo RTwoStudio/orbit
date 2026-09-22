@@ -56,6 +56,9 @@ type Config struct {
 }
 
 // UserPath returns the user config path, honoring --config and ORBIT_CONFIG.
+// Without overrides: an existing config.yml wins; otherwise an existing
+// config.json (JSON is valid YAML) is used; otherwise config.yml is the
+// canonical default path.
 func UserPath(flagOverride string) string {
 	if flagOverride != "" {
 		return flagOverride
@@ -64,7 +67,14 @@ func UserPath(flagOverride string) string {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "orbit", "config.yml")
+	base := filepath.Join(home, ".config", "orbit")
+	if _, err := os.Stat(filepath.Join(base, "config.yml")); err == nil {
+		return filepath.Join(base, "config.yml")
+	}
+	if _, err := os.Stat(filepath.Join(base, "config.json")); err == nil {
+		return filepath.Join(base, "config.json")
+	}
+	return filepath.Join(base, "config.yml")
 }
 
 // Load resolves the layered configuration. missingFile is not an error;
