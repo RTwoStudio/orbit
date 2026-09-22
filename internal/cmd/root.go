@@ -11,8 +11,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/orbit-sh/orbit-cli/internal/config"
 	"github.com/orbit-sh/orbit-cli/internal/exit"
 	"github.com/orbit-sh/orbit-cli/internal/logx"
+	"github.com/orbit-sh/orbit-cli/internal/ui"
 )
 
 // version is set at build time via -ldflags.
@@ -111,7 +113,10 @@ Run 'orbit neocortex --help' for the full verb tree.`,
 		SilenceUsage:  true,
 		SilenceErrors: true, // we print via internal/exit
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Reserved for shared pre-run (color policy etc.).
+			// Color policy: config ui.color + NO_COLOR + --no-color.
+			// Best-effort config read; unreadable config falls back to auto.
+			cfg, _ := config.Load(flagConfig)
+			ui.Setup(cfg.UI.Color, flagNoColor)
 		},
 	}
 	p := root.PersistentFlags()

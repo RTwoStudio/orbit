@@ -1,5 +1,5 @@
 registry:
-  url: ""
+  url: https://github.com/RTwoStudio/orbit-registry.git
   ref: main
   token_env: ORBIT_REGISTRY_TOKEN
 opencode:

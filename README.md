@@ -72,9 +72,9 @@ still contains one.
 
 ```yaml
 registry:
-  url: https://github.com/<org>/orbit-registry   # REQUIRED for install/update
+  url: https://github.com/RTwoStudio/orbit-registry.git   # default; set "" to require explicit config
   ref: main
-  token_env: ORBIT_REGISTRY_TOKEN   # env var NAME; the token is never stored
+  token_env: ORBIT_REGISTRY_TOKEN   # env var NAME holding an access token for PRIVATE registries
 opencode:
   dir: ~/.config/opencode
 neocortex:
@@ -82,10 +82,14 @@ neocortex:
 vault:
   dir: ~/.orbit-vault               # reserved (v0.2.0)
 ui:
-  color: auto
+  color: auto                       # auto (TTY-only) | always | never; NO_COLOR and --no-color also win
 ```
 
 Env overrides (highest precedence): `ORBIT_REGISTRY_URL`, `ORBIT_OPENCODE_DIR`.
+
+Private registries: set the env var named by `token_env` (e.g. `export
+ORBIT_REGISTRY_TOKEN=ghp_…`). It is used for authenticated `git clone` and
+API tarball downloads; the token value is never logged or stored.
 
 ## Exit codes
 

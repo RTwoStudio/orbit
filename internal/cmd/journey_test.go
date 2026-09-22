@@ -396,8 +396,10 @@ func (h *harness) fillTaskForRevise(t *testing.T, id string) {
 
 func TestConfigErrorHint(t *testing.T) {
 	h := newHarness(t)
-	// Remove registry.url from config.
-	os.WriteFile(filepath.Join(h.home, ".config", "orbit", "config.yml"), []byte("ui:\n  color: never\n"), 0o644)
+	// Explicitly blank registry.url overrides the embedded default
+	// (https://github.com/RTwoStudio/orbit-registry.git).
+	os.WriteFile(filepath.Join(h.home, ".config", "orbit", "config.yml"),
+		[]byte("registry:\n  url: \"\"\nui:\n  color: never\n"), 0o644)
 	err := h.runCode(t, 3, "neocortex", "install")
 	if !strings.Contains(err.Message, "registry.url") {
 		t.Errorf("config error message wrong: %q", err.Message)

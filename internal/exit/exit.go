@@ -6,6 +6,8 @@ package exit
 import (
 	"fmt"
 	"os"
+
+	"github.com/orbit-sh/orbit-cli/internal/ui"
 )
 
 // Code is an orbit exit code.
@@ -77,17 +79,18 @@ func Wrap(code Code, err error, message string, hints ...string) *Error {
 }
 
 // Print renders "error: ..." plus up to two "hint:" lines to stderr.
+// Styling follows the ui color policy (auto/always/never + --no-color).
 func Print(err error) {
 	e, ok := err.(*Error)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s %v\n", ui.Red("error:"), err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "error: %s\n", e.Message)
+	fmt.Fprintf(os.Stderr, "%s %s\n", ui.Red("error:"), e.Message)
 	for i, h := range e.Hints {
 		if i >= 2 {
 			break
 		}
-		fmt.Fprintf(os.Stderr, "hint: %s\n", h)
+		fmt.Fprintf(os.Stderr, "%s %s\n", ui.Dim("hint:"), h)
 	}
 }
