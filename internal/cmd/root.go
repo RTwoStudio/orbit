@@ -11,10 +11,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/RTwoStudio/orbit-cli/internal/config"
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
-	"github.com/RTwoStudio/orbit-cli/internal/logx"
-	"github.com/RTwoStudio/orbit-cli/internal/ui"
+	"github.com/RTwoStudio/orbit/internal/config"
+	"github.com/RTwoStudio/orbit/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/logx"
+	"github.com/RTwoStudio/orbit/internal/ui"
 )
 
 // version is set at build time via -ldflags.

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/exit"
 	"gopkg.in/yaml.v3"
 )
 

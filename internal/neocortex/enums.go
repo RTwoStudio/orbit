@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/exit"
 )
 
 // Status enums — single definition (§7). Canonical values are stored in

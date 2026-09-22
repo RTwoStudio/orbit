@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: |
           go build -trimpath \
-            -ldflags "-s -w -X github.com/RTwoStudio/orbit-cli/internal/cmd.version=${{ github.ref_name }}" \
+            -ldflags "-s -w -X github.com/RTwoStudio/orbit/internal/cmd.version=${{ github.ref_name }}" \
             -o orbit ./cmd/orbit
 
       - name: Package

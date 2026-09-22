@@ -1,4 +1,4 @@
-# orbit-cli
+# orbit
 
 The Go execution engine of the [NeoCortex](../registry/README.md) workflow:
 a deterministic filesystem + state-machine CLI. Cobra-based. **Contains zero
@@ -159,7 +159,7 @@ answers are never logged.
 ## Build & test
 
 ```sh
-go build -ldflags "-X github.com/orbit-sh/orbit-cli/internal/cmd.version=v0.1.0" -o orbit ./cmd/orbit
+go build -ldflags "-X github.com/RTwoStudio/orbit/internal/cmd.version=v0.1.0" -o orbit ./cmd/orbit
 go test ./...
 go vet ./...
 ```

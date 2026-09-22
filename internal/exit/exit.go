@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/RTwoStudio/orbit-cli/internal/ui"
+	"github.com/RTwoStudio/orbit/internal/ui"
 )
 
 // Code is an orbit exit code.

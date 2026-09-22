@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
-	"github.com/RTwoStudio/orbit-cli/internal/logx"
+	"github.com/RTwoStudio/orbit/internal/fsutil"
+	"github.com/RTwoStudio/orbit/internal/logx"
 )
 
 // CacheLoad loads the verified snapshot from the global cache. The cache

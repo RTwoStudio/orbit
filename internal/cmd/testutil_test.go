@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RTwoStudio/orbit-cli/internal/config"
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
-	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
-	"github.com/RTwoStudio/orbit-cli/internal/logx"
-	"github.com/RTwoStudio/orbit-cli/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/config"
+	"github.com/RTwoStudio/orbit/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/fsutil"
+	"github.com/RTwoStudio/orbit/internal/logx"
+	"github.com/RTwoStudio/orbit/internal/registry"
 )
 
 // fixtureRepo is a mutable copy of testdata/registry-fixture in a temp dir.

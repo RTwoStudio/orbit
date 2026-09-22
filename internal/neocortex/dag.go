@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/exit"
 )
 
 // dagLineRe is the strict line grammar (§9):

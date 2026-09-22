@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
+	"github.com/RTwoStudio/orbit/internal/fsutil"
 )
 
 // journeyInstallFresh: install in a bare dir creates cache, deploys

@@ -1,4 +1,4 @@
-module github.com/RTwoStudio/orbit-cli
+module github.com/RTwoStudio/orbit
 
 go 1.26.0
 

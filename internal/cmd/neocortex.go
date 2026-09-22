@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/RTwoStudio/orbit-cli/internal/exit"
+	"github.com/RTwoStudio/orbit/internal/exit"
 )
 
 func newNeoCortexCmd() *cobra.Command {

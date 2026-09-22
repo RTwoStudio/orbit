@@ -8,13 +8,13 @@
 # - Same/newer binary        -> leaves it untouched
 #
 # Env overrides (all optional):
-#   ORBIT_GH_REPO    GitHub repo            (default RTwoStudio/orbit-cli)
+#   ORBIT_GH_REPO    GitHub repo            (default RTwoStudio/orbit)
 #   ORBIT_GH_API     API base               (default https://api.github.com)
 #   ORBIT_GH_DL      download base          (default https://github.com)
 #   ORBIT_BIN_DIR    install dir            (default ~/.local/bin)
 set -euo pipefail
 
-GH_REPO="${ORBIT_GH_REPO:-RTwoStudio/orbit-cli}"
+GH_REPO="${ORBIT_GH_REPO:-RTwoStudio/orbit}"
 GH_API="${ORBIT_GH_API:-https://api.github.com}"
 GH_DL="${ORBIT_GH_DL:-https://github.com}"
 BIN_DIR="${ORBIT_BIN_DIR:-$HOME/.local/bin}"

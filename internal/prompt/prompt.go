@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/RTwoStudio/orbit-cli/internal/logx"
+	"github.com/RTwoStudio/orbit/internal/logx"
 	"golang.org/x/term"
 )
 

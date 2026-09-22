@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/RTwoStudio/orbit-cli/internal/fsutil"
+	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
