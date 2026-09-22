@@ -69,7 +69,7 @@ still contains one.
 ## Installation
 
 ```sh
-curl -fsSL https://rtwostudio.ir/install.sh | bash
+curl -fsSL https://orbit.rtwostudio.ir/install.sh | bash
 ```
 
 The installer detects OS/arch, resolves the latest GitHub Release of this

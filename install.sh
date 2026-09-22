@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # orbit installer — installs or updates the orbit CLI from GitHub Releases.
 #
-#   curl -fsSL https://rtwostudio.ir/install.sh | bash
+#   curl -fsSL https://orbit.rtwostudio.ir/install.sh | bash
 #
 # - No orbit binary present  -> installs the latest release
 # - Older binary present     -> updates it to the latest release
