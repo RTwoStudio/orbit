@@ -48,15 +48,13 @@ Mapping rules:
 - All `path` values are relative to `neocortex/`; paths that escape
   (`../`, absolute) are refused.
 
-Regenerating the manifest is mechanical and must never be hand-edited:
+Regenerating the manifest is mechanical and must never be hand-edited. The
+registry repo ships the generator:
 
 ```sh
-# registry repo
-find neocortex -name '*.md' | sort | xargs sha256sum   # slot into manifest.json
+# in the registry repo
+scripts/manifest.sh bump patch   # or minor / major
 ```
-
-The CLI's fixture mirror lives at `testdata/registry-fixture/` with its own
-generator: `scripts/make-manifest.sh [version]`.
 
 ## Stub placeholder convention
 
