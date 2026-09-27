@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/neocortex"
+	"github.com/RTwoStudio/orbit/internal/prompt"
 	"github.com/RTwoStudio/orbit/internal/registry"
 )
 
@@ -170,6 +172,7 @@ Example:
 			}
 
 			printSummary(cmd, "install", steps)
+			offerCompletion(cmd)
 			logx.Info("install complete version=%s", fc.Manifest.Version)
 			return nil
 		},
@@ -179,6 +182,43 @@ Example:
 	cmd.Flags().BoolVar(&globalOnly, "global-only", false,
 		"skip the project gate and bootstrap; only cache + opencode deployment")
 	return cmd
+}
+
+// offerCompletion quietly offers to install shell completion once, after a
+// successful project install. It never fails the install: absence of a shell,
+// a declined prompt, an opt-out env, or an already-installed file are all
+// silently tolerated.
+func offerCompletion(cmd *cobra.Command) {
+	if os.Getenv("ORBIT_NO_COMPLETION") == "1" {
+		return
+	}
+	shell, err := detectedShell(nil)
+	if err != nil {
+		return // unknown/undetectable shell — stay silent
+	}
+	target, err := completionTargetFor(shell)
+	if err != nil || fsutil.Exists(target.path) {
+		return // already installed (or unsupported) — nothing to do
+	}
+	if !flagYes {
+		if !stdinIsTTY() {
+			return // non-interactive: never surprise the caller
+		}
+		if !prompt.Confirm("Install shell completion for "+shell+"?", true, false) {
+			return
+		}
+	}
+	var buf strings.Builder
+	if err := generateCompletion(cmd.Root(), shell, &buf); err != nil {
+		return
+	}
+	if err := fsutil.AtomicWrite(target.path, []byte(buf.String()), 0o644); err != nil {
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "\nshell completion installed → %s\n", target.path)
+	if target.loadLine != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", target.loadLine)
+	}
 }
 
 // bootstrapProject = install step 5.

@@ -146,6 +146,19 @@ EOF
   log "seeded $CONFIG_DIR/config.yml"
 fi
 
+# --- shell completion (auto, opt out with ORBIT_NO_COMPLETION=1) ---------
+if [ "${ORBIT_NO_COMPLETION:-0}" = "1" ]; then
+  log "skipping shell completion (ORBIT_NO_COMPLETION=1)"
+else
+  # The binary is installed now; let it detect $SHELL and write the right
+  # per-shell completion file. Never fail the install over this.
+  if "$BIN_DIR/orbit" completion >/dev/null 2>&1; then
+    log "shell completion installed (remove with: orbit completion --uninstall)"
+  else
+    log "note: could not install shell completion — run 'orbit completion' yourself"
+  fi
+fi
+
 # --- done ----------------------------------------------------------------
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;

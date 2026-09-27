@@ -251,6 +251,15 @@ orbit completion fish --script   # print the script instead of installing
 orbit completion --uninstall     # remove an installed script
 ```
 
+Two paths install it automatically, so most users never run this by hand:
+
+- **`install.sh`** calls the freshly-installed binary once (silently, failure
+  is non-fatal), so a `curl | bash` install leaves you with completion.
+- **First `orbit neocortex install`** offers it once (interactive TTY only;
+  `--yes` accepts). It never installs when a completion file already exists.
+
+Opt out of both with `ORBIT_NO_COMPLETION=1` (install.sh honours it too).
+
 Supported: `bash`, `zsh`, `fish`, `powershell`. Each installs into that
 shell's user completion directory (`~/.zsh/completions/_orbit`,
 `~/.local/share/bash-completion/completions/orbit`,

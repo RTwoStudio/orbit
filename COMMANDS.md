@@ -136,6 +136,11 @@ Install dirs (overridable via env): `ZSH_COMPLETION_DIR` →
 `~/.local/share/bash-completion/completions/orbit`; `FISH_COMPLETION_DIR` →
 `~/.config/fish/completions/orbit.fish`; `POWERSHELL_COMPLETION_DIR` → a `.ps1`.
 
+**Automatic install:** `install.sh` runs `orbit completion` at the end of the
+install (silent, non-fatal), and the first `orbit neocortex install` offers it
+once (interactive TTY only; skipped when a completion file already exists).
+Set `ORBIT_NO_COMPLETION=1` to opt out of both.
+
 Exit codes: 0 · 2 · 7 · 10.
 
 ```sh
