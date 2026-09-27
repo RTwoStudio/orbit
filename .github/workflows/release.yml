@@ -10,6 +10,9 @@ permissions:
 jobs:
   build:
     strategy:
+      # One failing leg must not silently ship a partial release; fail-fast
+      # is off so BOTH legs' errors are reported in the same run.
+      fail-fast: false
       matrix:
         include:
           - { os: linux, arch: amd64, runner: ubuntu-latest }
@@ -23,14 +26,26 @@ jobs:
           go-version-file: go.mod
 
       - name: Build
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
+          # Normalize the tag (v0.5.0 -> 0.5.0) so released binaries report
+          # exactly what the compiled default would, and both strip cleanly.
+          semver="${VERSION#v}"
           go build -trimpath \
-            -ldflags "-s -w -X github.com/RTwoStudio/orbit/internal/cmd.version=${{ github.ref_name }}" \
+            -ldflags "-s -w -X github.com/RTwoStudio/orbit/internal/cmd.version=${semver}" \
             -o orbit ./cmd/orbit
+          # Prove the binary we are about to ship reports the version it claims.
+          test "$(./orbit --version)" = "orbit version ${semver}" \
+            || { echo "version mismatch: built binary does not report ${semver}"; exit 1; }
 
       - name: Package
+        env:
+          VERSION: ${{ github.ref_name }}
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          dir="orbit_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}"
+          dir="orbit_${VERSION}_${OS}_${ARCH}"
           mkdir "$dir"
           cp orbit "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
@@ -50,7 +65,20 @@ jobs:
           merge-multiple: true
 
       - name: Aggregate checksums
-        run: cat *.sha256 | tee checksums.txt
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Guard against a partial matrix: every expected asset must be here
+          # in both forms (.tar.gz and its .sha256). Otherwise fail loudly
+          # rather than publishing a one-arch release.
+          for arch in amd64 arm64; do
+            asset="orbit_${VERSION}_linux_${arch}.tar.gz"
+            test -f "$asset"        || { echo "missing asset: $asset"; exit 1; }
+            test -f "$asset.sha256" || { echo "missing checksum: $asset.sha256"; exit 1; }
+          done
+          cat *.sha256 | tee checksums.txt
+          echo "---- checksums.txt ----"; cat checksums.txt
 
       - uses: softprops/action-gh-release@v2
         with:
