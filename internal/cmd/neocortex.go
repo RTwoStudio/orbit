@@ -16,13 +16,15 @@ func newNeoCortexCmd() *cobra.Command {
 
 Command groups:
   install   First-contact setup: fetch registry, deploy agents, bootstrap project
-  update    OTA refresh of global assets (agents/commands) from the registry
+  update    (deprecated alias) use global 'orbit update' instead
   which     Print the active issue directory
   status    Render the active issue's full status overview
-  issue     Create, lock, list, switch issues
+  issue     Create, lock, list, show, switch issues (default lane)
+  quick     Light lane: one-sitting work in a single 00-quick.md
   plan      Lock the plan (hash-verified)
   addenda   Course-correction records against a locked plan
-  task      JIT task lifecycle (new/status/list/show/next)
+  task      JIT task lifecycle (new/start/revise/close/rework/list/show/next)
+  close     Verify a default-lane issue is complete (read-only)
 
 Exit codes:
   0 ok  1 general  2 usage  3 config_error  4 registry_unreachable
@@ -42,13 +44,15 @@ Exit codes:
 	}
 	cmd.AddCommand(
 		newInstallCmd(),
-		newUpdateCmd(),
+		newNeoCortexUpdateCmd(),
 		newWhichCmd(),
 		newStatusCmd(),
 		newIssueCmd(),
+		newQuickCmd(),
 		newPlanCmd(),
 		newAddendaCmd(),
 		newTaskCmd(),
+		newCloseCmd(),
 	)
 	return cmd
 }

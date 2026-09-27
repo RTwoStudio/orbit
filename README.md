@@ -7,15 +7,31 @@ binary; everything deployable lives in the registry repository and is
 consumed via the contract below.
 
 ```
+orbit update                 # refresh global assets (no project needed)
+orbit self update            # replace this binary with the latest release
 orbit neocortex install      # first contact: fetch → cache → deploy → bootstrap
-orbit neocortex update       # OTA refresh of global assets (version-gated)
 orbit neocortex which        # active issue dir
-orbit neocortex status       # active issue overview (DAG + statuses)
-orbit neocortex issue        # new | lock | list | switch
+orbit neocortex status       # active issue overview (lane-aware)
+orbit neocortex issue        # new | import | ingest | lock | list | show | switch
+orbit neocortex quick        # new | import | ingest | start | revise | close | rework | promote
 orbit neocortex plan         # lock
 orbit neocortex addenda      # new | list | show | approve | apply
-orbit neocortex task         # new | status | list | show | next
+orbit neocortex task         # new | start | revise | close | rework | list | show | next
+orbit neocortex close        # verify a default-lane issue is complete (read-only)
+orbit completion             # install bash/zsh/fish/powershell completion
 ```
+
+Two lanes, one numbered ledger. Every work item is an **issue**:
+
+- **default** (unmarked) — the full protocol: concept → plan → task DAG.
+- **quick** (`Class: quick`) — one-sitting work in a single `00-quick.md`.
+
+Intake selects the mode with a verb and takes a positional title:
+`new "<title>"` (interactive), `import <n|url> "<title>"` (remote, injected
+verbatim), `ingest <path> "<title>"` (file, injected verbatim). Status changes
+are verbs, never `--set`: `quick` and `task` share the short verbs
+`start | revise | close | rework`. `plan`, `addenda`, `task`, `quick`, and
+`close` act on the ACTIVE issue; `issue <verb> [N]` addresses one by number.
 
 ## Registry contract (v0.1.0)
 
@@ -96,7 +112,7 @@ opencode:
 neocortex:
   dir: .neocortex
 vault:
-  dir: ~/.orbit-vault               # reserved (v0.2.0)
+  dir: ~/.orbit-vault               # reserved (future)
 ui:
   color: auto                       # auto (TTY-only) | always | never; NO_COLOR and --no-color also win
 ```
@@ -157,17 +173,66 @@ answers are never logged.
 ## Build & test
 
 ```sh
-go build -ldflags "-X github.com/RTwoStudio/orbit/internal/cmd.version=v0.1.0" -o orbit ./cmd/orbit
+go build -ldflags "-X github.com/RTwoStudio/orbit/internal/cmd.version=v0.2.0" -o orbit ./cmd/orbit
 go test ./...
 go vet ./...
 ```
 
-## Scope notes (v0.1.0)
+## Self-update (binary)
 
-- `orbit neocortex close` does **not** exist; the registry ships the
-  `/close` command file with a "not implemented" notice for forward
-  compatibility. Invoking the verb falls through to cobra's
-  unknown-command error.
+```sh
+orbit self update            # update if a newer release exists
+orbit self update --check    # report current vs latest; change nothing
+orbit self update --force    # reinstall even if same or newer
+```
+
+`orbit self update` fetches the latest GitHub release, verifies the asset
+against `checksums.txt`, extracts the binary to a temp file **on the same
+filesystem** as the current one, and `rename(2)`s it over the running
+executable. That rename is why no restart dance is needed: a running
+executable can be renamed over on Linux/macOS (the old inode stays alive until
+the process exits), so the *next* invocation is the new version. It refuses to
+downgrade without `--force`, aborts on checksum mismatch, and errors clearly
+when the install dir isn't writable. **Linux only** for now; Windows raises an
+error (a running `.exe` can't be replaced in place).
+
+Source overrides (mirroring `install.sh`): `ORBIT_GH_REPO`, `ORBIT_GH_API`,
+`ORBIT_GH_DL`, and `ORBIT_GITHUB_TOKEN` for private repos/rate limits. The
+binary path comes from `os.Executable()` (symlinks resolved) or
+`ORBIT_BIN_DIR/<orbit>`.
+
+`orbit update` (top-level) is different: it refreshes **registry assets**
+(cache + opencode agents/commands). It writes only `~/.config`, so it runs in
+any directory — no project setup gate. `orbit neocortex update` still works as
+a deprecated alias.
+
+## Shell completion
+
+```sh
+orbit completion                 # install for $SHELL (or bash), idempotently
+orbit completion zsh             # install for a named shell
+orbit completion fish --script   # print the script instead of installing
+orbit completion --uninstall     # remove an installed script
+```
+
+Supported: `bash`, `zsh`, `fish`, `powershell`. Each installs into that
+shell's user completion directory (`~/.zsh/completions/_orbit`,
+`~/.local/share/bash-completion/completions/orbit`,
+`~/.config/fish/completions/orbit.fish`, a PowerShell `.ps1`), prints the
+one-line load step, and is safe to re-run. Override the target directory with
+`ZSH_COMPLETION_DIR`, `BASH_COMPLETION_USER_DIR`, `FISH_COMPLETION_DIR`, or
+`POWERSHELL_COMPLETION_DIR`.
+
+## Scope notes (v0.2.0)
+
+- **Verb-first CLI.** Intake is mode verbs (`new`/`import`/`ingest`); status
+  changes are short verbs (`quick`/`task` `start|revise|close|rework`). The old
+  `--title`/`--interactive`/`--from-remote`/`--from-file`, `task status --set=`,
+  and `--issue=<n>` surfaces are **gone** (breaking; pre-v1).
+- **Quick lane.** `orbit neocortex quick` runs one-sitting work in a single
+  `00-quick.md`. `quick promote <N>` converts it to the default lane in place.
+- **`close` exists** and is read-only: it verifies every task is `Close` and
+  prints the report. Quick runs close through `quick close <N>`.
 - Update touches only global state (cache, opencode assets,
   `deployed.json`) — never the project.
 - Only install/update ever prompt. Domain commands are deterministic and

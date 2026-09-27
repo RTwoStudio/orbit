@@ -96,6 +96,67 @@ func CheckTransition(from, to TaskStatus) error {
 			from.FileValue(), to.FileValue(), from.FileValue(), strings.Join(valid, ", ")))
 }
 
+// QuickStatus is the light-lane run status (one 00-quick.md per issue).
+// Canonical values mirror TaskStatus, plus the Draft starting state.
+type QuickStatus string // Draft, InProgress, Revise, Rework, Close
+
+const (
+	QuickDraft      QuickStatus = "Draft"
+	QuickInProgress QuickStatus = "InProgress"
+	QuickRevise     QuickStatus = "Revise"
+	QuickRework     QuickStatus = "Rework"
+	QuickClose      QuickStatus = "Close"
+)
+
+// FileValue maps the internal quick status to the YAML value.
+func (s QuickStatus) FileValue() string {
+	if s == QuickInProgress {
+		return "In Progress"
+	}
+	return string(s)
+}
+
+// quickStatusFromFile maps a file's Status string to canonical.
+func quickStatusFromFile(s string) QuickStatus {
+	switch s {
+	case "In Progress":
+		return QuickInProgress
+	case "Revise":
+		return QuickRevise
+	case "Rework":
+		return QuickRework
+	case "Close":
+		return QuickClose
+	}
+	return QuickDraft
+}
+
+// quickTransitions is the only legal edge set for a quick run.
+var quickTransitions = map[QuickStatus][]QuickStatus{
+	QuickDraft:      {QuickInProgress},
+	QuickInProgress: {QuickRevise},
+	QuickRevise:     {QuickRework, QuickClose},
+	QuickRework:     {QuickInProgress},
+	QuickClose:      {}, // terminal
+}
+
+// CheckQuickTransition validates a quick transition; illegal edges return a
+// state_conflict error listing the valid targets.
+func CheckQuickTransition(from, to QuickStatus) error {
+	for _, t := range quickTransitions[from] {
+		if t == to {
+			return nil
+		}
+	}
+	var valid []string
+	for _, t := range quickTransitions[from] {
+		valid = append(valid, t.FileValue())
+	}
+	return exit.New(exit.StateConflict,
+		fmt.Sprintf("illegal transition %s → %s (valid from %s: %s)",
+			from.FileValue(), to.FileValue(), from.FileValue(), strings.Join(valid, ", ")))
+}
+
 // SortTaskIDs orders T-ids numerically.
 func SortTaskIDs(ids []string) {
 	sort.Slice(ids, func(i, j int) bool {

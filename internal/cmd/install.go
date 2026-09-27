@@ -14,7 +14,6 @@ import (
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/neocortex"
-	"github.com/RTwoStudio/orbit/internal/prompt"
 	"github.com/RTwoStudio/orbit/internal/registry"
 )
 
@@ -237,78 +236,21 @@ func bootstrapProject(fc *registry.Fetched) []StepReport {
 	return steps
 }
 
-func newUpdateCmd() *cobra.Command {
+func newNeoCortexUpdateCmd() *cobra.Command {
 	var (
 		registryURL string
 		ref         string
 	)
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "OTA refresh of global assets from the registry (version-gated)",
-		Long: `Refreshes global assets: registry cache, opencode agents/commands,
-and deployed.json. NO project-side filesystem changes.
-
-Preflight (setup gate): requires an initialized project (.neocortex/)
-— update is role-locked to initialized projects (exit 11 when absent).
-
-Deploy decisions per agents/commands file:
-  - registry newer (semver) → prompt (TTY); --yes accepts all;
-    non-TTY without --yes treats as NO and lists pending updates
-  - same version but drifted content → warn + prompt, default NO
-  - recorded but absent from manifest → reported as orphaned (kept)
-
-Exit codes: 0 ok · 3 config_error · 4 registry_unreachable ·
-            10 io_error · 11 not_initialized
-
-Example:
-  orbit neocortex update --yes`,
+		Use:    "update",
+		Short:  "Deprecated alias for 'orbit update' (global registry refresh)",
+		Hidden: true,
+		Long: `Deprecated: use 'orbit update' instead. Kept so existing scripts keep
+working. Refreshes global assets only; it has NO project setup gate.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := setupGate("update"); err != nil {
-				return err
-			}
-			cfg, err := config.Load(flagConfig)
-			if err != nil {
-				return err
-			}
-			fc, err := fetchRegistry(cfg, registryURL, ref)
-			if err != nil {
-				return err
-			}
-			var steps []StepReport
-			steps = append(steps, StepReport{Step: "fetch", Action: "ok",
-				Detail: fmt.Sprintf("registry version %s", fc.Manifest.Version)})
-			steps = append(steps, populateCache(fc))
-
-			ocDir := deploy.OpenCodeDir(cfg.OpenCode.Dir)
-			deployed := deploy.LoadDeployed()
-			ask := func(msg string, def bool) bool {
-				if flagYes {
-					return def
-				}
-				if !stdinIsTTY() {
-					fmt.Fprintf(cmd.ErrOrStderr(), "%s → declined (non-interactive; run: orbit neocortex update --yes to accept)\n", msg)
-					return false
-				}
-				return prompt.Confirm(msg, def, false)
-			}
-			decisions, err := deploy.UpdateMode(fc, ocDir, deployed, ask)
-			for _, d := range decisions {
-				steps = append(steps, StepReport{Step: "deploy " + d.Path, Action: d.Action,
-					Detail: d.Detail, Path: d.Target})
-				logx.Info("deploy decision path=%s action=%s detail=%q", d.Path, d.Action, d.Detail)
-			}
-			if err != nil {
-				printSummary(cmd, "update", steps)
-				return err
-			}
-
-			printSummary(cmd, "update", steps)
-			deployedVersion := deployedVersionOf(deployed, fc.Manifest.Version)
-			final := fmt.Sprintf("Deployed version: %s (registry: %s)", deployedVersion, fc.Manifest.Version)
-			fmt.Fprintln(cmd.OutOrStderr(), final)
-			logx.Info("update complete %s", final)
-			return nil
+			fmt.Fprintln(cmd.ErrOrStderr(), "deprecated: 'orbit neocortex update' → 'orbit update'")
+			return runUpdate(cmd, registryURL, ref)
 		},
 	}
 	cmd.Flags().StringVar(&registryURL, "registry", "", "one-shot registry URL override")

@@ -43,6 +43,9 @@ func AddendaDir(n int) string          { return filepath.Join(IssueDir(n), "adde
 func NotesDir(n int) string            { return filepath.Join(IssueDir(n), "notes") }
 func TaskPath(n int, id string) string { return filepath.Join(TasksDir(n), id+".md") }
 
+// QuickPath returns the light-lane run file for issue n.
+func QuickPath(n int) string { return filepath.Join(IssueDir(n), "00-quick.md") }
+
 // ReadActive reads the ACTIVE pointer (issue number).
 func ReadActive() (int, error) {
 	data, err := os.ReadFile(filepath.Join(Root(), "ACTIVE"))

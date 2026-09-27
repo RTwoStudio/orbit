@@ -52,38 +52,12 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 			"registry cache is empty or corrupted — run: orbit neocortex update",
 			err.Error())
 	}
-	stubOf := func(name string) string {
-		for _, e := range cache.Manifest.Files.Stubs {
-			if filepath.Base(e.Path) == name {
-				return string(cache.Content[e.Path])
-			}
-		}
-		return ""
-	}
 	deployedVersion := cache.Manifest.Version
 
 	// Resolve Detail content per source mode.
-	var detail, source string
-	switch src.Mode {
-	case "interactive":
-		detail = "<!-- Agent: transcribe the Orchestrator's answers here verbatim,\nno embellishment. -->"
-		source = "interactive"
-	case "file":
-		data, err := os.ReadFile(src.FilePath)
-		if err != nil {
-			return nil, exit.Wrap(exit.NotFound, err, "cannot read source file "+src.FilePath)
-		}
-		detail = string(data)
-		source = "file:" + src.FilePath
-	case "remote":
-		data, err := fetchRemote(src.RemoteURL, src.TokenEnv)
-		if err != nil {
-			return nil, err
-		}
-		detail = data
-		source = "remote:" + src.RemoteURL
-	default:
-		return nil, exit.New(exit.Usage, "exactly one source flag is required (--interactive | --from-remote | --from-file)")
+	detail, source, err := resolveDetail(src)
+	if err != nil {
+		return nil, err
 	}
 
 	n, err := NextIssueNumber()
@@ -104,7 +78,7 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 		"REGISTRY_VERSION": deployedVersion,
 		"DETAIL":           detail,
 	}
-	concept, err := Render(stubOf("00-concept.stub.md"), issueVals)
+	concept, err := Render(stubContent(cache, "00-concept.stub.md"), issueVals)
 	if err != nil {
 		return nil, exit.Wrap(exit.General, err, "cannot render concept stub")
 	}
@@ -114,7 +88,7 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 		"DATE":             now,
 		"REGISTRY_VERSION": deployedVersion,
 	}
-	plan, err := Render(stubOf("01-plan.stub.md"), planVals)
+	plan, err := Render(stubContent(cache, "01-plan.stub.md"), planVals)
 	if err != nil {
 		return nil, exit.Wrap(exit.General, err, "cannot render plan stub")
 	}
@@ -154,6 +128,41 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 			fmt.Sprintf("issues/issue-%d/notes/", n),
 		},
 	}, nil
+}
+
+// stubContent returns the cached raw content of a registry stub by base name
+// ("" when the registry has no such stub).
+func stubContent(cache *registry.Fetched, name string) string {
+	for _, e := range cache.Manifest.Files.Stubs {
+		if filepath.Base(e.Path) == name {
+			return string(cache.Content[e.Path])
+		}
+	}
+	return ""
+}
+
+// resolveDetail resolves the Detail/Intent injection for an intake source.
+// interactive → an agent-instruction placeholder; file/remote → verbatim
+// content, with the provenance string recorded in the SOURCE frontmatter.
+func resolveDetail(src IssueSource) (detail, source string, err error) {
+	switch src.Mode {
+	case "interactive":
+		return "<!-- Agent: transcribe the Orchestrator's answers here verbatim,\nno embellishment. -->", "interactive", nil
+	case "file":
+		data, rerr := os.ReadFile(src.FilePath)
+		if rerr != nil {
+			return "", "", exit.Wrap(exit.NotFound, rerr, "cannot read source file "+src.FilePath)
+		}
+		return string(data), "file:" + src.FilePath, nil
+	case "remote":
+		data, rerr := fetchRemote(src.RemoteURL, src.TokenEnv)
+		if rerr != nil {
+			return "", "", rerr
+		}
+		return data, "remote:" + src.RemoteURL, nil
+	}
+	return "", "", exit.New(exit.Usage,
+		"exactly one source mode is required (interactive | file | remote)")
 }
 
 // fetchRemote GETs content for a remote source (GitHub issue URL → API),
@@ -237,17 +246,19 @@ func LockIssue(n int) (string, error) {
 	return hash, nil
 }
 
-// IssueInfo is one row of issue list.
+// IssueInfo is one row of issue list / status.
 type IssueInfo struct {
 	Number          int            `json:"id"`
 	Title           string         `json:"title"`
-	Concept         string         `json:"concept_status"`
-	Plan            string         `json:"plan_status"`
-	Addenda         []string       `json:"addenda_counts"`
-	ConceptAddenda  int            `json:"addenda_draft"`
-	ApprovedAddenda int            `json:"addenda_approved"`
-	AppliedAddenda  int            `json:"addenda_applied"`
-	TaskCounts      map[string]int `json:"task_counts"`
+	Lane            string         `json:"lane"` // "full" | "quick"
+	Quick           string         `json:"quick_status,omitempty"`
+	Concept         string         `json:"concept_status,omitempty"`
+	Plan            string         `json:"plan_status,omitempty"`
+	Addenda         []string       `json:"addenda_counts,omitempty"`
+	ConceptAddenda  int            `json:"addenda_draft,omitempty"`
+	ApprovedAddenda int            `json:"addenda_approved,omitempty"`
+	AppliedAddenda  int            `json:"addenda_applied,omitempty"`
+	TaskCounts      map[string]int `json:"task_counts,omitempty"`
 	Active          bool           `json:"active"`
 }
 
@@ -265,6 +276,17 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 	for _, n := range nums {
 		info := IssueInfo{Number: n, TaskCounts: map[string]int{}}
 		info.Active = n == active
+		// Quick lane: a single 00-quick.md, no concept/plan/tasks.
+		if qdoc, qerr := ParseDoc(QuickPath(n)); qerr == nil {
+			info.Lane = "quick"
+			info.Quick = qdoc.Get("Status")
+			if h1 := firstH1(qdoc.Body); h1 != "" {
+				info.Title = strings.TrimSpace(strings.TrimPrefix(h1, "Quick: "))
+			}
+			out = append(out, info)
+			continue
+		}
+		info.Lane = "full"
 		if doc, err := ParseDoc(ConceptPath(n)); err == nil {
 			info.Concept = doc.Get("Status")
 			if h1 := firstH1(doc.Body); h1 != "" {

@@ -22,12 +22,12 @@ func newPlanCmd() *cobra.Command {
 }
 
 func newPlanLockCmd() *cobra.Command {
-	var issue int
 	cmd := &cobra.Command{
-		Use:   "lock [--issue=<n>]",
+		Use:   "lock [n]",
 		Short: "Hash-lock the plan (one-way; Draft → Locked)",
 		Long: `Locks 01-plan.md: Status Locked, Locked-At now, Lock-Hash over the
-plan body. Prints a DAG summary on success.
+plan body. Prints a DAG summary on success. Defaults to the ACTIVE issue;
+pass N to target another.
 
 Preflights, in order:
   1. TAMPER CHECK FIRST: the concept's Lock-Hash is re-verified before any
@@ -39,13 +39,14 @@ Preflights, in order:
      listed order topologically valid — the offending raw line is quoted
 
 Exit codes: 0 ok · 5 not_found · 6 preflight_failed · 7 state_conflict
-            8 tamper_detected · 10 io_error
+            8 tamper_detected · 9 no_active_run · 10 io_error
 
 Example:
   orbit neocortex plan lock`,
+		Args:         usageArgs(cobra.MaximumNArgs(1)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			n, err := resolveIssue(issue)
+			n, err := resolveIssueArgs(args)
 			if err != nil {
 				return err
 			}
@@ -69,7 +70,6 @@ Example:
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&issue, "issue", 0, "issue number (default: ACTIVE)")
 	return cmd
 }
 

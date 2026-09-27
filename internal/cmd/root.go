@@ -18,7 +18,7 @@ import (
 )
 
 // version is set at build time via -ldflags.
-var version = "0.1.0"
+var version = "0.2.0"
 
 // Flags shared across the tree.
 var (
@@ -126,6 +126,9 @@ Run 'orbit neocortex --help' for the full verb tree.`,
 	p.BoolVar(&flagJSON, "json", false, "machine-readable JSON output on stdout (human text on stderr)")
 
 	root.AddCommand(newNeoCortexCmd())
+	root.AddCommand(newCompletionCmd())
+	root.AddCommand(newUpdateCmd())
+	root.AddCommand(newSelfCmd())
 	return root
 }
 

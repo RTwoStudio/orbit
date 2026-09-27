@@ -16,6 +16,7 @@ var tokenRe = regexp.MustCompile(`\{\{([A-Z_]+)\}\}`)
 // Known token sets per stub (validated at cache time; §10).
 var stubTokens = map[string]map[string]bool{
 	"00-concept.stub.md": {"ISSUE_ID": true, "ISSUE_TITLE": true, "DATE": true, "SOURCE": true, "REGISTRY_VERSION": true, "DETAIL": true},
+	"00-quick.stub.md":   {"ISSUE_ID": true, "ISSUE_TITLE": true, "DATE": true, "SOURCE": true, "REGISTRY_VERSION": true, "DETAIL": true},
 	"01-plan.stub.md":    {"ISSUE_ID": true, "ISSUE_TITLE": true, "DATE": true, "REGISTRY_VERSION": true},
 	"addenda.stub.md":    {"ADDENDA_NUM": true, "ADDENDA_TITLE": true, "ISSUE_ID": true, "DATE": true, "REGISTRY_VERSION": true},
 	"task.stub.md":       {"TASK_ID": true, "TASK_NAME": true, "ISSUE_ID": true, "DEPENDS_ON": true, "ORIGIN": true, "DATE": true, "REGISTRY_VERSION": true, "BLOCKED_BY": true, "BLOCKS": true},
