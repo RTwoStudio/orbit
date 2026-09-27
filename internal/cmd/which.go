@@ -32,7 +32,7 @@ Example:
 					"no active issue — run: orbit neocortex issue new",
 					"or switch to an existing issue: orbit neocortex issue switch <n>")
 			}
-			path := neocortex.IssueDir(n)
+			path := neocortex.ResolveIssueDir(n)
 			if flagJSON {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
 					"issue": n,
@@ -89,12 +89,12 @@ Example:
 				if flagJSON {
 					return json.NewEncoder(out).Encode(map[string]any{
 						"issue":        n,
-						"path":         neocortex.IssueDir(n),
+						"path":         neocortex.ResolveIssueDir(n),
 						"lane":         "quick",
 						"quick_status": info.Quick,
 					})
 				}
-				fmt.Fprintf(out, "issue-%d %q — lane: quick · status: %s\n", n, info.Title, info.Quick)
+				fmt.Fprintf(out, "issue %d %q — lane: quick · status: %s\n", n, info.Title, info.Quick)
 				fmt.Fprintf(out, "  file: %s\n", neocortex.QuickPath(n))
 				return nil
 			}
@@ -106,7 +106,7 @@ Example:
 			if flagJSON {
 				return json.NewEncoder(out).Encode(map[string]any{
 					"issue":   n,
-					"path":    neocortex.IssueDir(n),
+					"path":    neocortex.ResolveIssueDir(n),
 					"lane":    "full",
 					"concept": info.Concept,
 					"plan":    info.Plan,
@@ -118,7 +118,7 @@ Example:
 					"tasks": tasks,
 				})
 			}
-			fmt.Fprintf(out, "issue-%d %q — lane: full · concept: %s · plan: %s · addenda: %d draft / %d approved / %d applied\n\n",
+			fmt.Fprintf(out, "issue %d %q — lane: full · concept: %s · plan: %s · addenda: %d draft / %d approved / %d applied\n\n",
 				n, info.Title, info.Concept, info.Plan, info.ConceptAddenda, info.ApprovedAddenda, info.AppliedAddenda)
 			fmt.Fprintln(out, "Task DAG (order = topological):")
 			for _, t := range tasks {

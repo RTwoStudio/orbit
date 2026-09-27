@@ -3,9 +3,9 @@
 package fsutil
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -102,8 +102,8 @@ func GitignoreAppend(dir, line string) error {
 	return AtomicWrite(path, []byte(content), 0o644)
 }
 
-// MaxIssueNumber scans dir for "issue-<n>" subdirectories and returns the
-// largest n (0 if none).
+// MaxIssueNumber scans dir for issue directories ("<NNNN>-issue" /
+// "<NNNN>-quick") and returns the largest n (0 if none).
 func MaxIssueNumber(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -111,12 +111,21 @@ func MaxIssueNumber(dir string) int {
 	}
 	max := 0
 	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() || !strings.HasPrefix(name, "issue-") {
+		if !e.IsDir() {
 			continue
 		}
-		var n int
-		if _, err := fmt.Sscanf(name, "issue-%d", &n); err == nil && n > max {
+		name := e.Name()
+		i := strings.IndexByte(name, '-')
+		if i <= 0 || i == len(name)-1 {
+			continue
+		}
+		switch name[i+1:] {
+		case "issue", "quick":
+		default:
+			continue
+		}
+		n, err := strconv.Atoi(name[:i])
+		if err == nil && n > max {
 			max = n
 		}
 	}

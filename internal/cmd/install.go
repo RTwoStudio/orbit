@@ -216,22 +216,8 @@ func bootstrapProject(fc *registry.Fetched) []StepReport {
 	} else {
 		steps = append(steps, StepReport{Step: ".gitignore", Action: "up to date", Detail: ".neocortex/ entry ensured"})
 	}
-	// NEOCORTEX.md copy-if-missing (project root).
-	neoPath := "NEOCORTEX.md"
-	if fsutil.Exists(neoPath) {
-		steps = append(steps, StepReport{Step: "NEOCORTEX.md", Action: "up to date",
-			Detail: "exists — never touched, not even compared"})
-	} else {
-		if data, ok := fc.Content["NEOCORTEX.md"]; ok {
-			if err := fsutil.AtomicWrite(neoPath, data, 0o644); err != nil {
-				steps = append(steps, StepReport{Step: "NEOCORTEX.md", Action: "failed", Detail: err.Error()})
-			} else {
-				steps = append(steps, StepReport{Step: "NEOCORTEX.md", Action: "installed"})
-			}
-		} else {
-			steps = append(steps, StepReport{Step: "NEOCORTEX.md", Action: "warned", Detail: "missing from registry"})
-		}
-	}
+	// NEOCORTEX.md is intentionally NOT copied into the project: the workflow
+	// docs live in the deployed opencode assets, not the user's repo.
 	logx.Info("project bootstrapped path=%s", root)
 	return steps
 }

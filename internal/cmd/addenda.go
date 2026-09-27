@@ -129,7 +129,7 @@ Example:
 			}
 			path, err := neocortex.FindAddendaFile(n, nn)
 			if err != nil {
-				return exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue-%d", nn, n))
+				return exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue %d", nn, n))
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -166,7 +166,7 @@ Example:
 			if err := neocortex.ApproveAddenda(n, nn); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Approved addenda %02d for issue-%d\nNext: orbit neocortex addenda apply %d\n", nn, n, nn)
+			fmt.Fprintf(cmd.OutOrStdout(), "Approved addenda %02d for issue %d\nNext: orbit neocortex addenda apply %d\n", nn, n, nn)
 			return nil
 		},
 	}

@@ -160,7 +160,7 @@ func NewAddenda(issue int, title string) (string, error) {
 func ApproveAddenda(issue, nn int) error {
 	path, err := FindAddendaFile(issue, nn)
 	if err != nil {
-		return exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue-%d", nn, issue))
+		return exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue %d", nn, issue))
 	}
 	doc, err := ParseDoc(path)
 	if err != nil {
@@ -274,7 +274,7 @@ func ApplyAddenda(issue, nn int) (*AddendaApplyResult, error) {
 
 	addendaPath, err := FindAddendaFile(issue, nn)
 	if err != nil {
-		return nil, exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue-%d", nn, issue))
+		return nil, exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue %d", nn, issue))
 	}
 	addenda, err := ParseDoc(addendaPath)
 	if err != nil {

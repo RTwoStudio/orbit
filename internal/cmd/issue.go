@@ -44,7 +44,7 @@ func newIssueNewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `new "<title>"`,
 		Short: "Scaffold a new issue (interactive intake) and set it ACTIVE",
-		Long: `Scaffolds issues/issue-<n>/ (00-concept.md, 01-plan.md, tasks/,
+		Long: `Scaffolds issues/<NNNN>-issue/ (00-concept.md, 01-plan.md, tasks/,
 addenda/, notes/) from the cached registry stubs and writes ACTIVE.
 n = max existing + 1. All-or-nothing.
 
@@ -128,7 +128,7 @@ func runIssueNew(cmd *cobra.Command, title string, src neocortex.IssueSource) er
 	if flagJSON {
 		return json.NewEncoder(out).Encode(map[string]any{"issue": res.Number, "path": res.Dir})
 	}
-	fmt.Fprintf(out, "Created issue-%d (%s):\n", res.Number, res.Dir)
+	fmt.Fprintf(out, "Created issue %d (%s):\n", res.Number, res.Dir)
 	for _, t := range res.Tree {
 		fmt.Fprintf(out, "  %s\n", t)
 	}
@@ -169,7 +169,7 @@ Example:
 					"issue": n, "lock_hash": hash,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Locked issue-%d concept (hash %s…)\n", n, hash[:19])
+			fmt.Fprintf(cmd.OutOrStdout(), "Locked issue %d concept (hash %s…)\n", n, hash[:19])
 			return nil
 		},
 	}
@@ -256,9 +256,9 @@ Example:
 				return err
 			}
 			if flagJSON {
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"issue": n, "path": neocortex.IssueDir(n)})
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"issue": n, "path": neocortex.ResolveIssueDir(n)})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Active issue: %d (%s)\n", n, neocortex.IssueDir(n))
+			fmt.Fprintf(cmd.OutOrStdout(), "Active issue: %d (%s)\n", n, neocortex.ResolveIssueDir(n))
 			return nil
 		},
 	}
@@ -285,7 +285,7 @@ func showIssue(cmd *cobra.Command, n int) error {
 		}
 	}
 	if info == nil {
-		return exit.New(exit.NotFound, fmt.Sprintf("issue-%d does not exist", n))
+		return exit.New(exit.NotFound, fmt.Sprintf("issue %d does not exist", n))
 	}
 	tasks, err := neocortex.ListTasks(n)
 	if err != nil {
@@ -294,7 +294,7 @@ func showIssue(cmd *cobra.Command, n int) error {
 	if flagJSON {
 		return json.NewEncoder(out).Encode(map[string]any{
 			"issue":   n,
-			"path":    neocortex.IssueDir(n),
+			"path":    neocortex.ResolveIssueDir(n),
 			"lane":    info.Lane,
 			"concept": info.Concept,
 			"plan":    info.Plan,
@@ -306,7 +306,7 @@ func showIssue(cmd *cobra.Command, n int) error {
 			"tasks": tasks,
 		})
 	}
-	fmt.Fprintf(out, "issue-%d %q — concept: %s · plan: %s · addenda: %d draft / %d approved / %d applied\n\n",
+	fmt.Fprintf(out, "issue %d %q — concept: %s · plan: %s · addenda: %d draft / %d approved / %d applied\n\n",
 		n, info.Title, info.Concept, info.Plan, info.ConceptAddenda, info.ApprovedAddenda, info.AppliedAddenda)
 	fmt.Fprintln(out, "Task DAG (order = topological):")
 	for _, t := range tasks {

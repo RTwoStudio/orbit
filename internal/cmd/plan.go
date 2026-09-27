@@ -59,7 +59,7 @@ Example:
 					"issue": n, "tasks": dag.Tasks,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Locked plan for issue-%d — Task DAG (%d tasks):\n", n, len(dag.Tasks))
+			fmt.Fprintf(cmd.OutOrStdout(), "Locked plan for issue %d — Task DAG (%d tasks):\n", n, len(dag.Tasks))
 			for _, t := range dag.Tasks {
 				deps := "None"
 				if len(t.DependsOn) > 0 {

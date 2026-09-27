@@ -253,12 +253,10 @@ func ListIssues() ([]int, error) {
 	}
 	var out []int
 	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() || !strings.HasPrefix(name, "issue-") {
+		if !e.IsDir() {
 			continue
 		}
-		var n int
-		if _, err := fmt.Sscanf(name, "issue-%d", &n); err == nil {
+		if n, _, ok := ParseIssueDirName(e.Name()); ok {
 			out = append(out, n)
 		}
 	}

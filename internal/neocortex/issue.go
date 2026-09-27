@@ -190,9 +190,9 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 	if err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot scan issues dir")
 	}
-	// Defensive collision check.
-	if fsutil.IsDir(IssueDir(n)) {
-		return nil, exit.New(exit.StateConflict, fmt.Sprintf("issue-%d already exists — refusing to overwrite", n))
+	// Defensive collision check (either lane's folder for n).
+	if fsutil.IsDir(IssueDir(n)) || fsutil.IsDir(QuickDir(n)) {
+		return nil, exit.New(exit.StateConflict, fmt.Sprintf("issue %d already exists — refusing to overwrite", n))
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -247,11 +247,11 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 		Number: n,
 		Dir:    IssueDir(n),
 		Tree: []string{
-			fmt.Sprintf("issues/issue-%d/00-concept.md", n),
-			fmt.Sprintf("issues/issue-%d/01-plan.md", n),
-			fmt.Sprintf("issues/issue-%d/tasks/", n),
-			fmt.Sprintf("issues/issue-%d/addenda/", n),
-			fmt.Sprintf("issues/issue-%d/notes/", n),
+			fmt.Sprintf("issues/%s/00-concept.md", IssueDirName(n, LaneIssue)),
+			fmt.Sprintf("issues/%s/01-plan.md", IssueDirName(n, LaneIssue)),
+			fmt.Sprintf("issues/%s/tasks/", IssueDirName(n, LaneIssue)),
+			fmt.Sprintf("issues/%s/addenda/", IssueDirName(n, LaneIssue)),
+			fmt.Sprintf("issues/%s/notes/", IssueDirName(n, LaneIssue)),
 		},
 	}, nil
 }
@@ -355,10 +355,19 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 	for _, n := range nums {
 		info := IssueInfo{Number: n, TaskCounts: map[string]int{}}
 		info.Active = n == active
-		// Quick lane: a single 00-quick.md, no concept/plan/tasks.
-		if qdoc, qerr := ParseDoc(QuickPath(n)); qerr == nil {
+		// The folder suffix is authoritative; Class: quick must agree with it.
+		if IssueLane(n) == LaneQuick {
 			info.Lane = "quick"
+			qdoc, qerr := ParseDoc(QuickPath(n))
+			if qerr != nil {
+				info.Quick = "unreadable"
+				out = append(out, info)
+				continue
+			}
 			info.Quick = qdoc.Get("Status")
+			if qdoc.Get("Class") != string(LaneQuick) {
+				info.Quick += " (Class mismatch)"
+			}
 			if h1 := firstH1(qdoc.Body); h1 != "" {
 				info.Title = strings.TrimSpace(strings.TrimPrefix(h1, "Quick: "))
 			}
@@ -418,8 +427,8 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 
 // SwitchIssue validates the target issue and writes ACTIVE.
 func SwitchIssue(n int) error {
-	if !fsutil.IsDir(IssueDir(n)) {
-		return exit.New(exit.NotFound, fmt.Sprintf("issue-%d does not exist under %s", n, IssuesDir()),
+	if IssueLane(n) == "" {
+		return exit.New(exit.NotFound, fmt.Sprintf("issue %d does not exist under %s", n, IssuesDir()),
 			"list issues with: orbit neocortex issue list")
 	}
 	if err := WriteActive(n); err != nil {

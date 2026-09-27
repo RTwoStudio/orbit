@@ -20,7 +20,7 @@ type NewQuickResult struct {
 	Path   string
 }
 
-// NewQuick scaffolds the light lane: issues/issue-<n>/00-quick.md only (§5.4
+// NewQuick scaffolds the light lane: issues/<NNNN>-issue/00-quick.md only (§5.4
 // analogue). All-or-nothing: the dir is built under staging, then moved into
 // place, then ACTIVE is written.
 func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
@@ -51,8 +51,8 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 	if err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot scan issues dir")
 	}
-	if fsutil.IsDir(IssueDir(n)) {
-		return nil, exit.New(exit.StateConflict, fmt.Sprintf("issue-%d already exists — refusing to overwrite", n))
+	if fsutil.IsDir(IssueDir(n)) || fsutil.IsDir(QuickDir(n)) {
+		return nil, exit.New(exit.StateConflict, fmt.Sprintf("issue %d already exists — refusing to overwrite", n))
 	}
 
 	rendered, err := Render(stub, map[string]string{
@@ -74,7 +74,7 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 		rendered = injectIntoSection(rendered, "Intent", detail)
 	}
 
-	staging := IssueDir(n) + ".tmp-staging"
+	staging := QuickDir(n) + ".tmp-staging"
 	os.RemoveAll(staging)
 	defer os.RemoveAll(staging)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -83,14 +83,14 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 	if err := os.WriteFile(filepath.Join(staging, "00-quick.md"), rendered, 0o644); err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot write quick file")
 	}
-	if err := os.Rename(staging, IssueDir(n)); err != nil {
+	if err := os.Rename(staging, QuickDir(n)); err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot move staging dir into place")
 	}
 	if err := WriteActive(n); err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot write ACTIVE")
 	}
 	logx.Info("quick created issue=%d title=%q source=%s", n, title, source)
-	return &NewQuickResult{Number: n, Dir: IssueDir(n), Path: QuickPath(n)}, nil
+	return &NewQuickResult{Number: n, Dir: QuickDir(n), Path: QuickPath(n)}, nil
 }
 
 // QuickStatusOf reads a quick run's status.
@@ -162,7 +162,7 @@ func PromoteQuick(n int) (string, error) {
 	}
 	if fsutil.Exists(ConceptPath(n)) {
 		return "", exit.New(exit.StateConflict,
-			fmt.Sprintf("%s already exists — issue-%d is already in the default lane", ConceptPath(n), n))
+			fmt.Sprintf("%s already exists — issue %d is already in the default lane", ConceptPath(n), n))
 	}
 
 	cache, err := registry.CacheLoad()
@@ -179,7 +179,7 @@ func PromoteQuick(n int) (string, error) {
 
 	title := quickTitle(qdoc)
 	intent := strings.TrimSpace(StripHTMLComments(Section(qdoc.Body, "Intent")))
-	detail := fmt.Sprintf("<!-- Promoted from quick run issue-%d. The original Intent follows. -->\n\n%s", n, intent)
+	detail := fmt.Sprintf("<!-- Promoted from quick run issue %d. The original Intent follows. -->\n\n%s", n, intent)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	vals := map[string]string{
@@ -204,6 +204,22 @@ func PromoteQuick(n int) (string, error) {
 		return "", exit.Wrap(exit.General, err, "cannot render plan stub")
 	}
 
+	// Rename the folder <NNNN>-quick → <NNNN>-issue so the name stays truthful.
+	oldDir := QuickDir(n)
+	newDir := IssueDir(n)
+	if fsutil.IsDir(oldDir) {
+		if fsutil.Exists(newDir) {
+			return "", exit.New(exit.StateConflict,
+				fmt.Sprintf("%s already exists — cannot promote in place", newDir))
+		}
+		if err := os.Rename(oldDir, newDir); err != nil {
+			return "", exit.Wrap(exit.IOError, err, "cannot rename "+oldDir+" → "+newDir)
+		}
+	}
+	if err := os.Remove(filepath.Join(newDir, "00-quick.md")); err != nil && !os.IsNotExist(err) {
+		return "", exit.Wrap(exit.IOError, err, "cannot remove quick file")
+	}
+
 	for _, d := range []string{TasksDir(n), AddendaDir(n), NotesDir(n)} {
 		if err := fsutil.EnsureDir(d); err != nil {
 			return "", exit.Wrap(exit.IOError, err, "cannot create "+d)
@@ -214,9 +230,6 @@ func PromoteQuick(n int) (string, error) {
 	}
 	if err := fsutil.AtomicWrite(PlanPath(n), plan, 0o644); err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot write plan")
-	}
-	if err := os.Remove(quickPath); err != nil {
-		return "", exit.Wrap(exit.IOError, err, "cannot remove quick file")
 	}
 	logx.Info("quick promoted issue=%d → default lane", n)
 	return ConceptPath(n), nil

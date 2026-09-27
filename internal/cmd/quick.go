@@ -50,7 +50,7 @@ func newQuickNewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   `new "<title>"`,
 		Short: "Scaffold a quick run (interactive intake) and set it ACTIVE",
-		Long: `Creates issues/issue-<n>/00-quick.md with Class: quick and Status:
+		Long: `Creates issues/<NNNN>-issue/00-quick.md with Class: quick and Status:
 Draft, then writes ACTIVE. Intent is injected as an agent-instruction
 placeholder; the Orchestrator fills Intent/Approach/Checklist through
 approved writes.
@@ -129,7 +129,7 @@ func runQuickNew(cmd *cobra.Command, title string, src neocortex.IssueSource) er
 			"issue": res.Number, "path": res.Path, "class": "quick",
 		})
 	}
-	fmt.Fprintf(out, "Created quick issue-%d (%s)\n", res.Number, res.Path)
+	fmt.Fprintf(out, "Created quick issue %d (%s)\n", res.Number, res.Path)
 	fmt.Fprintln(out, "Next: fill Intent/Approach/Checklist, then: orbit neocortex quick start <n>")
 	return nil
 }
@@ -171,7 +171,7 @@ func newQuickTransitionCmd(use, short string, to neocortex.QuickStatus) *cobra.C
 					"issue": n, "from": from.FileValue(), "to": to.FileValue(),
 				})
 			}
-			fmt.Fprintf(out, "quick issue-%d: %s → %s\n", n, from.FileValue(), to.FileValue())
+			fmt.Fprintf(out, "quick issue %d: %s → %s\n", n, from.FileValue(), to.FileValue())
 			return nil
 		},
 	}
@@ -206,7 +206,7 @@ Example:
 			if flagJSON {
 				return json.NewEncoder(out).Encode(map[string]any{"issue": n, "path": path})
 			}
-			fmt.Fprintf(out, "Promoted issue-%d to the default lane — concept created at %s\n", n, path)
+			fmt.Fprintf(out, "Promoted issue %d to the default lane — concept created at %s\n", n, path)
 			fmt.Fprintln(out, "Next: fill the concept, then: orbit neocortex issue lock")
 			return nil
 		},

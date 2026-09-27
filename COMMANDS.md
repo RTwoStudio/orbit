@@ -18,7 +18,7 @@ orbit <group> <subgroup> <verb> [operands...] [flags]
   **ACTIVE** issue (`.neocortex/ACTIVE`). Only `issue <verb> [N]` addresses an
   issue by number. Cross-issue work: `orbit neocortex issue switch <N>` first.
 - **Two lanes, one ledger:** every work item is an issue under one counter
-  (`issues/issue-N/`).
+  (`issues/0001-issue/`).
   - *default* (unmarked) — the full protocol: concept → plan → task DAG.
   - *quick* (`Class: quick`) — one-sitting work in a single `00-quick.md`.
 - **The CLI owns frontmatter.** Status changes happen only through verbs; never
@@ -194,7 +194,7 @@ same work. Same flags (`--registry`, `--ref`). Hidden from `--help`.
 
 ### `issue new "<title>"`
 
-Interactive intake. Scaffolds `issues/issue-N/` with `00-concept.md`,
+Interactive intake. Scaffolds `issues/0001-issue/` with `00-concept.md`,
 `01-plan.md`, `tasks/`, `notes/`, `addenda/`, and sets ACTIVE. The concept's
 Detail is an agent-instruction placeholder.
 
@@ -271,7 +271,7 @@ Lifecycle: `Draft → In Progress → Revise → Rework → Close`
 | `quick import <n\|url> "<title>"` | GitHub/GitLab issue/PR | fetched text, verbatim |
 | `quick ingest <path> "<title>"` | local file | file bytes, verbatim |
 
-Each scaffolds `issues/issue-N/00-quick.md` (`Class: quick`, `Status: Draft`)
+Each scaffolds `issues/0001-issue/00-quick.md` (`Class: quick`, `Status: Draft`)
 and sets ACTIVE.
 
 Exit codes: 0 · 3 · 4 · 5 · 6 · 7 · 10.

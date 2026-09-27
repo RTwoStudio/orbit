@@ -23,7 +23,7 @@ type CloseReport struct {
 func BuildCloseReport(n int) (*CloseReport, error) {
 	if fsutil.Exists(QuickPath(n)) {
 		return nil, exit.New(exit.StateConflict,
-			fmt.Sprintf("issue-%d is a quick run — close it with: orbit neocortex quick close %d", n, n))
+			fmt.Sprintf("issue %d is a quick run — close it with: orbit neocortex quick close %d", n, n))
 	}
 	concept, err := ParseDoc(ConceptPath(n))
 	if err != nil {
@@ -51,7 +51,7 @@ func BuildCloseReport(n int) (*CloseReport, error) {
 	}
 	if len(open) > 0 {
 		return nil, exit.New(exit.PreflightFailed,
-			fmt.Sprintf("issue-%d has %d task(s) not Close: %s", n, len(open), strings.Join(open, ", ")),
+			fmt.Sprintf("issue %d has %d task(s) not Close: %s", n, len(open), strings.Join(open, ", ")),
 			"close every task first; rework any that still need work")
 	}
 

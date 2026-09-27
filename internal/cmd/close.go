@@ -39,7 +39,7 @@ Example:
 			if flagJSON {
 				return json.NewEncoder(out).Encode(report)
 			}
-			fmt.Fprintf(out, "issue-%d %q is complete — concept: %s · plan: %s\n\n",
+			fmt.Fprintf(out, "issue %d %q is complete — concept: %s · plan: %s\n\n",
 				report.Issue, report.Title, report.Concept, report.Plan)
 			fmt.Fprintln(out, "Tasks:")
 			for _, t := range report.Tasks {
