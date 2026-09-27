@@ -53,7 +53,7 @@ var newFetcher = func(cfg *config.Config, urlFlag, refFlag string) registry.Fetc
 	if refFlag != "" {
 		ref = refFlag
 	}
-	return registry.RemoteFetcher{URL: url, Ref: ref, TokenEnv: cfg.Registry.TokenEnv}
+	return registry.RemoteFetcher{URL: url, Ref: ref, TokenEnv: cfg.Tokens.Registry}
 }
 
 // fetchRegistry = install/update steps 1–2: resolve config, fetch, verify.
@@ -250,7 +250,7 @@ working. Refreshes global assets only; it has NO project setup gate.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.ErrOrStderr(), "deprecated: 'orbit neocortex update' → 'orbit update'")
-			return runUpdate(cmd, registryURL, ref)
+			return runUpdate(cmd, registryURL, ref, false)
 		},
 	}
 	cmd.Flags().StringVar(&registryURL, "registry", "", "one-shot registry URL override")

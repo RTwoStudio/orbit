@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,10 +181,22 @@ func (r RemoteFetcher) fetchGit() (map[string][]byte, error) {
 }
 
 func (r RemoteFetcher) fetchTarball() (map[string][]byte, error) {
-	// https://github.com/<org>/<repo> → API tarball endpoint.
 	apiURL := strings.TrimSuffix(r.URL, ".git")
-	apiURL = strings.Replace(apiURL, "https://github.com/", "https://api.github.com/repos/", 1)
-	apiURL = apiURL + "/tarball/" + r.Ref
+	switch {
+	case strings.HasPrefix(apiURL, "https://github.com/"):
+		// https://github.com/<org>/<repo> → API tarball endpoint.
+		apiURL = strings.Replace(apiURL, "https://github.com/", "https://api.github.com/repos/", 1)
+		apiURL = apiURL + "/tarball/" + r.Ref
+	case strings.HasPrefix(apiURL, "https://gitlab.com/"):
+		// https://gitlab.com/<path> → API v4 repository archive.
+		// The project path is the segment(s) after the host, URL-encoded;
+		// ref is a query parameter.
+		rest := strings.TrimPrefix(apiURL, "https://gitlab.com/")
+		apiURL = fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/archive.tar.gz?sha=%s",
+			url.PathEscape(strings.Trim(rest, "/")), url.QueryEscape(r.Ref))
+	default:
+		return nil, fmt.Errorf("registry tarball fallback supports github.com and gitlab.com URLs only — use a git URL with git installed: %s", r.URL)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -191,7 +204,11 @@ func (r RemoteFetcher) fetchTarball() (map[string][]byte, error) {
 		return nil, err
 	}
 	if tok := r.token(); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+		if strings.Contains(apiURL, "gitlab.com/api/v4") {
+			req.Header.Set("PRIVATE-TOKEN", tok)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

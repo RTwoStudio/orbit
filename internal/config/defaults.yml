@@ -1,7 +1,10 @@
 registry:
   url: https://github.com/RTwoStudio/orbit-registry.git
   ref: main
-  token_env: ORBIT_REGISTRY_TOKEN
+tokens:
+  registry: ORBIT_REGISTRY_TOKEN
+  github: ORBIT_GITHUB_TOKEN
+  gitlab: ORBIT_GITLAB_TOKEN
 opencode:
   dir: ~/.config/opencode
 neocortex:

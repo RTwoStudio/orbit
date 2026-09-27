@@ -18,9 +18,17 @@ var defaultsYAML []byte
 
 // Registry holds registry access settings.
 type Registry struct {
-	URL      string `yaml:"url"`
-	Ref      string `yaml:"ref"`
-	TokenEnv string `yaml:"token_env"`
+	URL string `yaml:"url"`
+	Ref string `yaml:"ref"`
+}
+
+// Tokens holds the env-var NAMES for provider credentials. Secrets are never
+// stored in config.yml — only the name of the environment variable that holds
+// them (see README for why).
+type Tokens struct {
+	Registry string `yaml:"registry"` // registry repo token env (default ORBIT_REGISTRY_TOKEN)
+	GitHub   string `yaml:"github"`   // GitHub issue/PR intake token env (default ORBIT_GITHUB_TOKEN)
+	GitLab   string `yaml:"gitlab"`   // GitLab issue/MR intake token env (default ORBIT_GITLAB_TOKEN)
 }
 
 // OpenCode holds the opencode deployment dir.
@@ -46,6 +54,7 @@ type UI struct {
 // Config is the fully-resolved orbit configuration.
 type Config struct {
 	Registry  Registry  `yaml:"registry"`
+	Tokens    Tokens    `yaml:"tokens"`
 	OpenCode  OpenCode  `yaml:"opencode"`
 	NeoCortex NeoCortex `yaml:"neocortex"`
 	Vault     Vault     `yaml:"vault"`
@@ -56,9 +65,8 @@ type Config struct {
 }
 
 // UserPath returns the user config path, honoring --config and ORBIT_CONFIG.
-// Without overrides: an existing config.yml wins; otherwise an existing
-// config.json (JSON is valid YAML) is used; otherwise config.yml is the
-// canonical default path.
+// Both config.yml (canonical) and config.json are supported; an existing .yml
+// wins, otherwise an existing .json is used, otherwise .yml is the default.
 func UserPath(flagOverride string) string {
 	if flagOverride != "" {
 		return flagOverride
@@ -98,7 +106,7 @@ func Load(flagOverride string) (*Config, error) {
 		if err := yaml.Unmarshal(data, &raw); err == nil {
 			for k := range raw {
 				switch k {
-				case "registry", "opencode", "neocortex", "vault", "ui":
+				case "registry", "tokens", "opencode", "neocortex", "vault", "ui":
 				default:
 					fmt.Fprintf(os.Stderr, "warning: unknown config key %q in %s\n", k, userPath)
 				}
@@ -113,15 +121,35 @@ func Load(flagOverride string) (*Config, error) {
 	if v := os.Getenv("ORBIT_OPENCODE_DIR"); v != "" {
 		cfg.OpenCode.Dir = v
 	}
-	if cfg.Registry.TokenEnv == "" {
-		cfg.Registry.TokenEnv = "ORBIT_REGISTRY_TOKEN"
-	}
 	if cfg.Registry.Ref == "" {
 		cfg.Registry.Ref = "main"
+	}
+	// Token env names default per provider (the secret itself never lives in
+	// config.yml — only the name of the env var that holds it).
+	if cfg.Tokens.Registry == "" {
+		cfg.Tokens.Registry = "ORBIT_REGISTRY_TOKEN"
+	}
+	if cfg.Tokens.GitHub == "" {
+		cfg.Tokens.GitHub = "ORBIT_GITHUB_TOKEN"
+	}
+	if cfg.Tokens.GitLab == "" {
+		cfg.Tokens.GitLab = "ORBIT_GITLAB_TOKEN"
 	}
 
 	expand(cfg)
 	return cfg, nil
+}
+
+// TokenEnvFor returns the env-var name holding the credential for a remote
+// source provider ("github", "gitlab", or anything else → registry token).
+func (c *Config) TokenEnvFor(provider string) string {
+	switch provider {
+	case "github":
+		return c.Tokens.GitHub
+	case "gitlab":
+		return c.Tokens.GitLab
+	}
+	return c.Tokens.Registry
 }
 
 // expand applies ~ expansion to all path fields.

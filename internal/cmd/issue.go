@@ -69,16 +69,22 @@ func newIssueImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `import <n|url> "<title>"`,
 		Short: "Scaffold an issue from a remote reference (Detail verbatim)",
-		Long: `Fetches the remote content (GitHub issue/PR → API, 15s timeout; token
-via token_env) and injects it VERBATIM into Detail. Nothing is written on
+		Long: `Fetches the remote content and injects it VERBATIM into Detail. Supports
+GitHub and GitLab issues/PRs:
+  - github.com/<o>/<r>/issues/<n>  (or /pull/<n>)
+  - gitlab.com/<group>/<proj>/-/issues/<n>  (or /merge_requests/<n>)
+Any other URL is fetched as-is (raw GET). 15s timeout; the token is read from
+the env var named in config under tokens.github / tokens.gitlab.
+(GitHub: Authorization: Bearer; GitLab: PRIVATE-TOKEN). Nothing is written on
 failure (exit 4).
 
 Exit codes: 0 ok · 3 config_error · 4 registry_unreachable
             6 preflight_failed · 7 state_conflict · 10 io_error
 
-Example:
+Examples:
   orbit neocortex issue import 42 "Retry limit on the client"
-  orbit neocortex issue import https://github.com/acme/app/issues/42 "Retry limit"`,
+  orbit neocortex issue import https://github.com/acme/app/issues/42 "Retry limit"
+  orbit neocortex issue import https://gitlab.com/acme/app/-/issues/42 "Retry limit"`,
 		Args:         usageArgs(cobra.ExactArgs(2)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -86,7 +92,7 @@ Example:
 			if err != nil {
 				return err
 			}
-			src := neocortex.IssueSource{Mode: "remote", RemoteURL: args[0], TokenEnv: cfg.Registry.TokenEnv}
+			src := neocortex.IssueSource{Mode: "remote", RemoteURL: args[0], TokenEnv: cfg.TokenEnvFor(neocortex.ProviderOf(args[0]))}
 			return runIssueNew(cmd, args[1], src)
 		},
 	}

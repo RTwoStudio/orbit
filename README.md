@@ -100,13 +100,18 @@ them to the GitHub Release.
 
 ## Configuration
 
-`~/.config/orbit/config.yml` (overridable via `--config` / `ORBIT_CONFIG`):
+The canonical file is `~/.config/orbit/config.yml` (YAML; overridable via
+`--config` / `ORBIT_CONFIG`). A legacy `config.json` is still read when no
+`.yml` exists, so existing setups keep working; new installs seed YAML only.
 
 ```yaml
 registry:
-  url: https://github.com/RTwoStudio/orbit-registry.git   # default; set "" to require explicit config
+  url: https://github.com/RTwoStudio/orbit-registry.git   # or a GitLab .git URL
   ref: main
-  token_env: ORBIT_REGISTRY_TOKEN   # env var NAME holding an access token for PRIVATE registries
+tokens:                            # env-var NAMES — the secrets live in your shell
+  registry: ORBIT_REGISTRY_TOKEN
+  github: ORBIT_GITHUB_TOKEN
+  gitlab: ORBIT_GITLAB_TOKEN
 opencode:
   dir: ~/.config/opencode
 neocortex:
@@ -117,11 +122,20 @@ ui:
   color: auto                       # auto (TTY-only) | always | never; NO_COLOR and --no-color also win
 ```
 
-Env overrides (highest precedence): `ORBIT_REGISTRY_URL`, `ORBIT_OPENCODE_DIR`.
+Env overrides (highest precedence): `ORBIT_REGISTRY_URL`, `ORBIT_OPENCODE_DIR`,
+`ORBIT_GITLAB_URL` (self-hosted GitLab host for issue intake).
 
-Private registries: set the env var named by `token_env` (e.g. `export
-ORBIT_REGISTRY_TOKEN=ghp_…`). It is used for authenticated `git clone` and
-API tarball downloads; the token value is never logged or stored.
+**Tokens:** `config.yml` never holds a secret — the `tokens:` block holds the
+**names** of environment variables. Export them yourself:
+
+```sh
+export ORBIT_REGISTRY_TOKEN=…   # registry repo access
+export ORBIT_GITHUB_TOKEN=…     # github.com issue/PR intake
+export ORBIT_GITLAB_TOKEN=…     # gitlab.com (or self-hosted) issue/MR intake
+```
+
+The registry token is sent as `Authorization: Bearer` to GitHub and
+`PRIVATE-TOKEN` to GitLab; token values are never logged or stored.
 
 ## License
 
@@ -143,7 +157,7 @@ export ORBIT_REGISTRY_TOKEN=github_pat_…   # read-only Contents on orbit-regis
 ```
 
 The token is used for authenticated clone/tarball fetches and is never
-logged or stored (see `token_env` in Configuration).
+logged or stored (see `tokens:` in Configuration).
 
 ## Exit codes
 
@@ -204,7 +218,29 @@ binary path comes from `os.Executable()` (symlinks resolved) or
 `orbit update` (top-level) is different: it refreshes **registry assets**
 (cache + opencode agents/commands). It writes only `~/.config`, so it runs in
 any directory — no project setup gate. `orbit neocortex update` still works as
-a deprecated alias.
+a deprecated alias. Use `--prune` to delete orphaned deployed assets (only
+files the CLI deployed and that you haven't edited since).
+
+## Registries: GitHub and GitLab
+
+```yaml
+registry:
+  url: https://github.com/RTwoStudio/orbit-registry.git   # or https://gitlab.com/<group>/<repo>.git
+  ref: main
+```
+
+Git clone is preferred; when git is unavailable the tarball fallback supports
+both hosts. Tokens come from the env vars named under `tokens:` in
+`config.yml` (the secret itself is never stored).
+
+Remote issue intake (`issue import` / `quick import`) also supports both:
+
+```sh
+orbit neocortex quick import https://github.com/acme/app/issues/42 "Title"
+orbit neocortex quick import https://gitlab.com/acme/app/-/issues/42 "Title"
+```
+
+Self-hosted GitLab: set `ORBIT_GITLAB_URL=https://gitlab.example.com`.
 
 ## Shell completion
 

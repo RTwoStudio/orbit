@@ -121,17 +121,29 @@ else
   sudo mv "$tmp/orbit_${tag}_${os}_${arch}/orbit" "$BIN_DIR/orbit"
 fi
 
-# --- seed config (never overwrite) --------------------------------------
+# --- seed config (never overwrite; respect an existing .yml OR .json) ----
 if [ ! -f "$CONFIG_DIR/config.yml" ] && [ ! -f "$CONFIG_DIR/config.json" ]; then
   mkdir -p "$CONFIG_DIR"
-  cat > "$CONFIG_DIR/config.json" <<'EOF'
-{
-  "registry": { "url": "https://github.com/RTwoStudio/orbit-registry.git", "ref": "main" },
-  "opencode": { "dir": "~/.config/opencode" },
-  "neocortex": { "dir": ".neocortex" }
-}
+  cat > "$CONFIG_DIR/config.yml" <<'EOF'
+# orbit configuration — layered: embedded defaults < this file < env vars.
+# Secrets are NEVER stored here: each token field holds the NAME of an
+# environment variable that carries the secret (or a gitignored .env you source).
+registry:
+  url: https://github.com/RTwoStudio/orbit-registry.git   # or a GitLab .git URL
+  ref: main
+tokens:
+  registry: ORBIT_REGISTRY_TOKEN   # registry repo
+  github: ORBIT_GITHUB_TOKEN       # github.com issue/PR intake
+  gitlab: ORBIT_GITLAB_TOKEN       # gitlab.com (or self-hosted) issue/MR intake
+opencode:
+  dir: ~/.config/opencode
+neocortex:
+  dir: .neocortex
+ui:
+  color: auto                      # auto | always | never
 EOF
-  log "seeded $CONFIG_DIR/config.json"
+  chmod 600 "$CONFIG_DIR/config.yml"
+  log "seeded $CONFIG_DIR/config.yml"
 fi
 
 # --- done ----------------------------------------------------------------

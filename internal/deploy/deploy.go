@@ -142,7 +142,12 @@ type PromptFunc func(msg string, def bool) bool
 // UpdateMode deploys with the version gate: prompts per file when the
 // registry is newer; warns + prompts on same-version content drift;
 // reports orphans. --yes accepts all; non-TTY without --yes declines all.
-func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, prompt PromptFunc) ([]Decision, error) {
+//
+// prune controls orphan handling: false → report "orphaned (kept)";
+// true → delete orphans and drop their ledger records, but ONLY when the
+// on-disk file still matches the sha256 the CLI recorded (never touch a file
+// the user edited, and never touch a file that was never in the ledger).
+func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, prompt PromptFunc, prune bool) ([]Decision, error) {
 	var out []Decision
 	entries := append(append([]registry.FileEntry{}, fc.Manifest.Files.OpenCode.Agents...), fc.Manifest.Files.OpenCode.Commands...)
 	seen := map[string]bool{}
@@ -212,12 +217,44 @@ func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, pro
 		out = append(out, dec)
 	}
 
-	// Orphans: recorded but absent from the new manifest (informational).
-	for path := range deployed {
-		if !seen[path] {
-			out = append(out, Decision{Path: path, Target: TargetOf(path, opencodeDir), Action: "orphaned",
-				Detail: "no longer in the registry manifest (left in place)"})
+	// Orphans: recorded but absent from the new manifest.
+	for path, rec := range deployed {
+		if seen[path] {
+			continue
 		}
+		target := TargetOf(path, opencodeDir)
+		dec := Decision{Path: path, Target: target}
+		if !prune {
+			dec.Action = "orphaned"
+			dec.Detail = "no longer in the registry manifest (left in place)"
+			out = append(out, dec)
+			continue
+		}
+		// Prune: delete only files the CLI still owns (unchanged since deploy).
+		existing, rerr := os.ReadFile(target)
+		switch {
+		case os.IsNotExist(rerr):
+			delete(deployed, path)
+			changed = true
+			dec.Action = "pruned"
+			dec.Detail = "recorded but already gone; ledger entry dropped"
+		case rerr != nil:
+			return nil, exit.Wrap(exit.IOError, rerr, "cannot read "+target)
+		case registry.SHA256Hex(existing) != rec.SHA256:
+			delete(deployed, path)
+			changed = true
+			dec.Action = "kept"
+			dec.Detail = "locally modified since deploy — file kept, ledger entry dropped"
+		default:
+			if err := os.Remove(target); err != nil {
+				return nil, exit.Wrap(exit.IOError, err, "cannot prune "+target)
+			}
+			delete(deployed, path)
+			changed = true
+			dec.Action = "pruned"
+			dec.Detail = "no longer in the registry manifest"
+		}
+		out = append(out, dec)
 	}
 	if changed {
 		if err := deployed.Save(); err != nil {

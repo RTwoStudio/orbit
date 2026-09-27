@@ -47,7 +47,7 @@ func DefaultConfig(current string) (*Config, error) {
 		DownloadBase: envOr("ORBIT_GH_DL", "https://github.com"),
 		BinPath:      bin,
 		Current:      current,
-		Token:        os.Getenv("ORBIT_GITHUB_TOKEN"),
+		Token:        os.Getenv(envOr("ORBIT_GH_TOKEN_ENV", "ORBIT_GITHUB_TOKEN")),
 	}
 	return cfg, nil
 }

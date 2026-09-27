@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +35,132 @@ type NewIssueResult struct {
 	Tree   []string
 }
 
-var githubIssueRe = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/(?:issues|pull)/(\d+)`)
+var (
+	githubIssueRe = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/(?:issues|pull)/(\d+)`)
+	gitlabIssueRe = regexp.MustCompile(`^https://(?:www\.)?gitlab\.com/(.+?)/(?:-/?)?(?:issues|merge_requests)/(\d+)`)
+	gitlabBareRe  = regexp.MustCompile(`^gitlab\.com/(.+?)/(?:-/?)?(?:issues|merge_requests)/(\d+)`)
+)
+
+// remoteRef describes how to fetch a remote issue/PR across providers.
+type remoteRef struct {
+	provider string // "github" | "gitlab"
+	api      string // fully-formed API URL
+	prefix   string // header line for the injected content
+}
+
+// parseRemoteRef maps a GitHub or GitLab issue/PR reference to its API call.
+// Accepts full URLs (https://github.com/o/r/issues/1, https://gitlab.com/g/p/-/issues/1)
+// and a GitLab shorthand (gitlab.com/g/p/issues/1). An unrecognized reference
+// is fetched as-is (raw GET) — useful for arbitrary content URLs.
+func parseRemoteRef(rawurl string) remoteRef {
+	if m := githubIssueRe.FindStringSubmatch(rawurl); m != nil {
+		return remoteRef{
+			provider: "github",
+			api:      fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%s", m[1], m[2], m[3]),
+			prefix:   fmt.Sprintf("# %s/%s#%s\n\n", m[1], m[2], m[3]),
+		}
+	}
+	if m := gitlabIssueRe.FindStringSubmatch(rawurl); m != nil {
+		return gitlabRef(m[1], m[2])
+	}
+	if m := gitlabBareRe.FindStringSubmatch(rawurl); m != nil {
+		return gitlabRef(m[1], m[2])
+	}
+	return remoteRef{provider: "raw", api: rawurl}
+}
+
+// gitlabRef builds the GitLab API v4 URL. Project paths are URL-encoded
+// (group/subgroup/project → group%2Fsubgroup%2Fproject).
+func gitlabRef(projectPath, iid string) remoteRef {
+	base := strings.TrimRight(envOr("ORBIT_GITLAB_URL", "https://gitlab.com"), "/")
+	scheme := "https://"
+	host := base
+	if i := strings.Index(base, "://"); i >= 0 {
+		scheme = base[:i+3]
+		host = base[i+3:]
+	}
+	enc := url.PathEscape(strings.Trim(projectPath, "/"))
+	return remoteRef{
+		provider: "gitlab",
+		api:      fmt.Sprintf("%s%s/api/v4/projects/%s/issues/%s", scheme, host, enc, iid),
+		prefix:   fmt.Sprintf("# %s#%s\n\n", strings.Trim(projectPath, "/"), iid),
+	}
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// ProviderOf classifies a remote reference by provider, for token selection.
+func ProviderOf(rawurl string) string {
+	return parseRemoteRef(rawurl).provider
+}
+
+// fetchRemote GETs content for a remote source (GitHub/GitLab issue URL →
+// API, or a raw URL), 15s timeout. Failure is registry_unreachable; nothing
+// is written.
+func fetchRemote(rawurl, tokenEnv string) (string, error) {
+	ref := parseRemoteRef(rawurl)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.api, nil)
+	if err != nil {
+		return "", exit.New(exit.RegistryUnreachable, "invalid remote URL "+rawurl)
+	}
+	switch ref.provider {
+	case "github":
+		req.Header.Set("Accept", "application/vnd.github+json")
+	case "gitlab":
+		req.Header.Set("Accept", "application/json")
+	}
+	if tokenEnv != "" {
+		if tok := os.Getenv(tokenEnv); tok != "" {
+			switch ref.provider {
+			case "gitlab":
+				// GitLab uses PRIVATE-TOKEN; a "Bearer" scheme also works on
+				// recent versions, so send both-safe: PRIVATE-TOKEN.
+				req.Header.Set("PRIVATE-TOKEN", tok)
+			default:
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", exit.New(exit.RegistryUnreachable, fmt.Sprintf("remote fetch failed: %v — nothing written", err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", exit.New(exit.RegistryUnreachable,
+			fmt.Sprintf("remote fetch failed: HTTP %d from %s — nothing written", resp.StatusCode, ref.api))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", exit.New(exit.RegistryUnreachable, fmt.Sprintf("remote read failed: %v — nothing written", err))
+	}
+	switch ref.provider {
+	case "github":
+		var payload struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		}
+		if json.Unmarshal(body, &payload) == nil && (payload.Title != "" || payload.Body != "") {
+			return ref.prefix + payload.Title + "\n\n" + payload.Body, nil
+		}
+	case "gitlab":
+		var payload struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		}
+		if json.Unmarshal(body, &payload) == nil && (payload.Title != "" || payload.Description != "") {
+			return ref.prefix + payload.Title + "\n\n" + payload.Description, nil
+		}
+	}
+	return ref.prefix + string(body), nil
+}
 
 // NewIssue scaffolds the full issue tree (§5.4). All-or-nothing: the whole
 // tree is built under a staging dir, then moved into place.
@@ -163,53 +289,6 @@ func resolveDetail(src IssueSource) (detail, source string, err error) {
 	}
 	return "", "", exit.New(exit.Usage,
 		"exactly one source mode is required (interactive | file | remote)")
-}
-
-// fetchRemote GETs content for a remote source (GitHub issue URL → API),
-// 15s timeout. Failure is registry_unreachable; nothing is written.
-func fetchRemote(rawurl, tokenEnv string) (string, error) {
-	api := rawurl
-	titlePrefix := ""
-	if m := githubIssueRe.FindStringSubmatch(rawurl); m != nil {
-		api = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%s", m[1], m[2], m[3])
-		titlePrefix = "# " + m[1] + "/" + m[2] + "#" + m[3] + "\n\n"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
-	if err != nil {
-		return "", exit.New(exit.RegistryUnreachable, "invalid remote URL "+rawurl)
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	if tokenEnv != "" {
-		if tok := os.Getenv(tokenEnv); tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
-		}
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", exit.New(exit.RegistryUnreachable, fmt.Sprintf("remote fetch failed: %v — nothing written", err))
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", exit.New(exit.RegistryUnreachable,
-			fmt.Sprintf("remote fetch failed: HTTP %d from %s — nothing written", resp.StatusCode, api))
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", exit.New(exit.RegistryUnreachable, fmt.Sprintf("remote read failed: %v — nothing written", err))
-	}
-	if strings.Contains(api, "api.github.com") {
-		var payload struct {
-			Title string `json:"title"`
-			Body  string `json:"body"`
-		}
-		if json.Unmarshal(body, &payload) == nil {
-			out := titlePrefix + payload.Title + "\n\n" + payload.Body
-			return out, nil
-		}
-	}
-	return titlePrefix + string(body), nil
 }
 
 // LockIssue performs issue lock (§5.5) with ordered preflights.
