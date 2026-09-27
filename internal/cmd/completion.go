@@ -112,14 +112,27 @@ func completionTargetFor(shell string) (completionTarget, error) {
 	switch shell {
 	case "zsh":
 		base := os.Getenv("ZSH_COMPLETION_DIR")
+		loadHint := ""
 		if base == "" {
-			base = filepath.Join(home, ".zsh", "completions")
+			// Prefer a directory zsh already searches, so completion works
+			// without the user editing their shell config:
+			//   1. oh-my-zsh's custom/completions (on fpath by default)
+			//   2. the ~/.zsh/completions convention (needs a fpath line)
+			if d := ohMyZshCustomCompletions(home); d != "" {
+				base = d
+			} else {
+				base = filepath.Join(home, ".zsh", "completions")
+				loadHint = fmt.Sprintf(
+					"ensure it is on your fpath, e.g. add to ~/.zshrc:\n  fpath=(%s $fpath)\n  autoload -Uz compinit && compinit", base)
+			}
+		}
+		if loadHint == "" {
+			loadHint = "zsh loads this automatically (it is already on your fpath)"
 		}
 		return completionTarget{
-			shell: shell,
-			path:  filepath.Join(base, "_orbit"),
-			loadLine: fmt.Sprintf(
-				"ensure it is on your fpath, e.g. add to ~/.zshrc:\n  fpath=(%s $fpath)\n  autoload -Uz compinit && compinit", base),
+			shell:    shell,
+			path:     filepath.Join(base, "_orbit"),
+			loadLine: loadHint,
 		}, nil
 	case "bash":
 		// Bash completion works without an explicit source line.
@@ -155,6 +168,28 @@ func completionTargetFor(shell string) (completionTarget, error) {
 		}, nil
 	}
 	return completionTarget{}, exit.New(exit.Usage, fmt.Sprintf("unsupported shell %q", shell))
+}
+
+// ohMyZshCustomCompletions returns oh-my-zsh's custom completions dir when
+// oh-my-zsh is installed (that path is on fpath by default). Empty otherwise,
+// so callers fall back to the plain ~/.zsh/completions convention.
+func ohMyZshCustomCompletions(home string) string {
+	zsh := os.Getenv("ZSH")
+	if zsh == "" {
+		zsh = filepath.Join(home, ".oh-my-zsh")
+	}
+	if fi, err := os.Stat(zsh); err != nil || !fi.IsDir() {
+		return ""
+	}
+	custom := os.Getenv("ZSH_CUSTOM")
+	if custom == "" {
+		custom = filepath.Join(zsh, "custom")
+	}
+	dir := filepath.Join(custom, "completions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
 }
 
 func installCompletion(cmd *cobra.Command, args []string) error {
