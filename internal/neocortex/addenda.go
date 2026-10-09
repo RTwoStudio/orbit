@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/scaffold"
 )
 
 func regexpAmendment() *regexp.Regexp {
@@ -39,7 +41,7 @@ var (
 // Changes section. Lines inside HTML comment blocks are ignored; a line
 // that starts with a delta verb but fails to parse is an error (quoted).
 func ParseAddendaDeltas(body []byte) ([]AddendaDelta, error) {
-	sec := Section(body, "Plan Changes")
+	sec := doc.Section(body, "Plan Changes")
 	if sec == nil {
 		return nil, nil
 	}
@@ -99,14 +101,14 @@ func depsString(deps []string) string {
 // NewAddenda scaffolds NN-<slug>.md in the issue's addenda dir (§5.9).
 func NewAddenda(issue int, title string) (string, error) {
 	// Preflight: plan Locked + concept hash verified.
-	concept, err := ParseDoc(ConceptPath(issue))
+	concept, err := doc.ParseDoc(ConceptPath(issue))
 	if err != nil {
 		return "", exit.New(exit.NotFound, "concept missing: "+ConceptPath(issue))
 	}
 	if err := VerifyHash(concept, concept.Get("Lock-Hash")); err != nil {
 		return "", err
 	}
-	plan, err := ParseDoc(PlanPath(issue))
+	plan, err := doc.ParseDoc(PlanPath(issue))
 	if err != nil {
 		return "", exit.New(exit.NotFound, "plan missing: "+PlanPath(issue))
 	}
@@ -136,7 +138,7 @@ func NewAddenda(issue int, title string) (string, error) {
 			stub = string(cache.Content[e.Path])
 		}
 	}
-	rendered, err := Render(stub, map[string]string{
+	rendered, err := scaffold.Render(stub, map[string]string{
 		"ADDENDA_NUM":      fmt.Sprintf("%d", nn),
 		"ADDENDA_TITLE":    title,
 		"ISSUE_ID":         fmt.Sprintf("%d", issue),
@@ -147,7 +149,7 @@ func NewAddenda(issue int, title string) (string, error) {
 		return "", exit.Wrap(exit.General, err, "cannot render addenda stub")
 	}
 
-	fname := fmt.Sprintf("%s-%s.md", AddendaFilePrefix(nn), SanitizeSlug(title))
+	fname := fmt.Sprintf("%s-%s.md", AddendaFilePrefix(nn), doc.SanitizeSlug(title))
 	path := filepath.Join(AddendaDir(issue), fname)
 	if err := fsutil.AtomicWrite(path, rendered, 0o644); err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot write "+path)
@@ -162,22 +164,22 @@ func ApproveAddenda(issue, nn int) error {
 	if err != nil {
 		return exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue %d", nn, issue))
 	}
-	doc, err := ParseDoc(path)
+	d, err := doc.ParseDoc(path)
 	if err != nil {
 		return exit.New(exit.PreflightFailed, err.Error())
 	}
-	switch doc.Get("Status") {
+	switch d.Get("Status") {
 	case "Approved", "Applied":
-		return exit.New(exit.StateConflict, fmt.Sprintf("%s is already %s — approval is one-way", path, doc.Get("Status")))
+		return exit.New(exit.StateConflict, fmt.Sprintf("%s is already %s — approval is one-way", path, d.Get("Status")))
 	case "Draft":
 	default:
-		return exit.New(exit.PreflightFailed, fmt.Sprintf("%s has unexpected Status %q", path, doc.Get("Status")))
+		return exit.New(exit.PreflightFailed, fmt.Sprintf("%s has unexpected Status %q", path, d.Get("Status")))
 	}
-	if agentPlaceholderRe.Match(doc.Body) {
+	if agentPlaceholderRe.Match(d.Body) {
 		return exit.New(exit.PreflightFailed,
 			fmt.Sprintf("%s still contains '<!-- Agent:' placeholders — resolve them before approval", path))
 	}
-	deltas, err := ParseAddendaDeltas(doc.Body)
+	deltas, err := ParseAddendaDeltas(d.Body)
 	if err != nil {
 		return exit.New(exit.PreflightFailed, err.Error())
 	}
@@ -185,9 +187,9 @@ func ApproveAddenda(issue, nn int) error {
 		return exit.New(exit.PreflightFailed,
 			fmt.Sprintf("%s: Plan Changes section has no ADD/REMOVE/MODIFY lines", path))
 	}
-	doc.Set("Status", "Approved")
-	doc.Set("Approved-At", time.Now().UTC().Format(time.RFC3339))
-	if err := doc.Save(); err != nil {
+	d.Set("Status", "Approved")
+	d.Set("Approved-At", time.Now().UTC().Format(time.RFC3339))
+	if err := d.Save(); err != nil {
 		return exit.Wrap(exit.IOError, err, "cannot rewrite "+path)
 	}
 	logx.Info("addenda approved issue=%d nn=%d deltas=%d", issue, nn, len(deltas))
@@ -220,7 +222,7 @@ func ListAddenda(issue int) ([]AddendaInfo, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		doc, err := ParseDoc(filepath.Join(dir, e.Name()))
+		d, err := doc.ParseDoc(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -228,13 +230,13 @@ func ListAddenda(issue int) ([]AddendaInfo, error) {
 		fmt.Sscanf(e.Name(), "%d-", &nn)
 		info := AddendaInfo{
 			NN:         nn,
-			Status:     doc.Get("Status"),
-			Created:    doc.Get("Created"),
-			ApprovedAt: doc.Get("Approved-At"),
-			AppliedAt:  doc.Get("Applied-At"),
+			Status:     d.Get("Status"),
+			Created:    d.Get("Created"),
+			ApprovedAt: d.Get("Approved-At"),
+			AppliedAt:  d.Get("Applied-At"),
 			File:       filepath.Join(dir, e.Name()),
 		}
-		if h1 := firstH1(doc.Body); h1 != "" {
+		if h1 := firstH1(d.Body); h1 != "" {
 			info.Title = strings.TrimSpace(strings.TrimPrefix(h1, fmt.Sprintf("Addenda %d:", nn)))
 		}
 		out = append(out, info)
@@ -257,14 +259,14 @@ type AddendaApplyResult struct {
 // level, sequential atomic writes at the file level.
 func ApplyAddenda(issue, nn int) (*AddendaApplyResult, error) {
 	// Locate + hash-verify concept and plan first.
-	concept, err := ParseDoc(ConceptPath(issue))
+	concept, err := doc.ParseDoc(ConceptPath(issue))
 	if err != nil {
 		return nil, exit.New(exit.NotFound, "concept missing: "+ConceptPath(issue))
 	}
 	if err := VerifyHash(concept, concept.Get("Lock-Hash")); err != nil {
 		return nil, err
 	}
-	plan, err := ParseDoc(PlanPath(issue))
+	plan, err := doc.ParseDoc(PlanPath(issue))
 	if err != nil {
 		return nil, exit.New(exit.NotFound, "plan missing: "+PlanPath(issue))
 	}
@@ -276,7 +278,7 @@ func ApplyAddenda(issue, nn int) (*AddendaApplyResult, error) {
 	if err != nil {
 		return nil, exit.New(exit.NotFound, fmt.Sprintf("addenda %02d not found in issue %d", nn, issue))
 	}
-	addenda, err := ParseDoc(addendaPath)
+	addenda, err := doc.ParseDoc(addendaPath)
 	if err != nil {
 		return nil, exit.New(exit.PreflightFailed, err.Error())
 	}
@@ -295,7 +297,7 @@ func ApplyAddenda(issue, nn int) (*AddendaApplyResult, error) {
 	}
 
 	// Validate deltas against the current effective DAG.
-	dagSec := Section(plan.Body, "Task DAG")
+	dagSec := doc.Section(plan.Body, "Task DAG")
 	dag, err := ParseDAG(dagSec)
 	if err != nil {
 		return nil, err
@@ -384,7 +386,7 @@ func ApplyAddenda(issue, nn int) (*AddendaApplyResult, error) {
 		if !fsutil.Exists(tp) {
 			continue
 		}
-		tdoc, err := ParseDoc(tp)
+		tdoc, err := doc.ParseDoc(tp)
 		if err != nil {
 			return nil, exit.Wrap(exit.IOError, err, "cannot parse "+tp)
 		}
@@ -424,7 +426,7 @@ func rewriteDAGSection(body []byte, sim *DAG) []byte {
 			}
 			continue
 		}
-		if isHeading([]byte(line)) && trimmed != "## Task DAG" {
+		if doc.IsHeading([]byte(line)) && trimmed != "## Task DAG" {
 			// End of section: append any new tasks before it.
 			for _, t := range sim.Tasks {
 				if !emitted[t.ID] {
@@ -463,7 +465,7 @@ func appendToSection(body []byte, section, text string) []byte {
 	in := false
 	end := len(lines)
 	for i, line := range lines {
-		if in && isHeading([]byte(line)) {
+		if in && doc.IsHeading([]byte(line)) {
 			end = i
 			break
 		}
@@ -477,9 +479,9 @@ func appendToSection(body []byte, section, text string) []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-func addendaTitle(doc *Doc) string {
-	if h1 := firstH1(doc.Body); h1 != "" {
-		return strings.TrimSpace(strings.TrimPrefix(h1, fmt.Sprintf("Addenda %s:", doc.Get("Addenda"))))
+func addendaTitle(d *doc.Doc) string {
+	if h1 := firstH1(d.Body); h1 != "" {
+		return strings.TrimSpace(strings.TrimPrefix(h1, fmt.Sprintf("Addenda %s:", d.Get("Addenda"))))
 	}
 	return ""
 }

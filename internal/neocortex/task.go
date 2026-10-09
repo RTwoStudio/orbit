@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/scaffold"
 )
 
 var taskIDRe = regexp.MustCompile(`^T[0-9]+$`)
@@ -19,14 +21,14 @@ var taskIDRe = regexp.MustCompile(`^T[0-9]+$`)
 // NewTask scaffolds tasks/<ID>.md JIT (§5.10).
 func NewTask(issue int, id, name string) (path string, warnings []string, err error) {
 	// Preflight: plan Locked + concept hash verified.
-	concept, err := ParseDoc(ConceptPath(issue))
+	concept, err := doc.ParseDoc(ConceptPath(issue))
 	if err != nil {
 		return "", nil, exit.New(exit.NotFound, "concept missing: "+ConceptPath(issue))
 	}
 	if err := VerifyHash(concept, concept.Get("Lock-Hash")); err != nil {
 		return "", nil, err
 	}
-	plan, err := ParseDoc(PlanPath(issue))
+	plan, err := doc.ParseDoc(PlanPath(issue))
 	if err != nil {
 		return "", nil, exit.New(exit.NotFound, "plan missing: "+PlanPath(issue))
 	}
@@ -48,12 +50,12 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 	}
 	tp := TaskPath(issue, id)
 	if fsutil.Exists(tp) {
-		doc, perr := ParseDoc(tp)
+		d, perr := doc.ParseDoc(tp)
 		if perr == nil {
-			placeholders := len(agentPlaceholderRe.FindAll(doc.Body, -1))
+			placeholders := len(agentPlaceholderRe.FindAll(d.Body, -1))
 			return "", nil, exit.New(exit.StateConflict,
 				fmt.Sprintf("%s already exists (status: %s, %d agent placeholders remaining) — resume it instead of recreating",
-					tp, doc.Get("status"), placeholders))
+					tp, d.Get("status"), placeholders))
 		}
 		return "", nil, exit.New(exit.StateConflict, fmt.Sprintf("%s already exists", tp))
 	}
@@ -71,7 +73,7 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 				fmt.Sprintf("dependency %s has NO task file yet — %s will block until it is created", dep, id))
 			continue
 		}
-		if ddoc, perr := ParseDoc(depPath); perr == nil && ddoc.Get("status") != string(StatusClose) {
+		if ddoc, perr := doc.ParseDoc(depPath); perr == nil && ddoc.Get("status") != string(StatusClose) {
 			warnings = append(warnings,
 				fmt.Sprintf("WARNING: dependency %s is not Close (status: %s) — %s starts blocked",
 					dep, ddoc.Get("status"), id))
@@ -88,7 +90,7 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 			stub = string(cache.Content[e.Path])
 		}
 	}
-	rendered, err := Render(stub, map[string]string{
+	rendered, err := scaffold.Render(stub, map[string]string{
 		"TASK_ID":          id,
 		"TASK_NAME":        name,
 		"ISSUE_ID":         fmt.Sprintf("%d", issue),
@@ -103,14 +105,14 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 		return "", nil, exit.Wrap(exit.General, err, "cannot render task stub")
 	}
 	// amendments pre-list.
-	doc, err := ParseDocBytes(tp, rendered)
+	d, err := doc.ParseDocBytes(tp, rendered)
 	if err != nil {
 		return "", nil, exit.Wrap(exit.General, err, "cannot parse rendered task")
 	}
 	for _, nn := range amendmentNNs {
-		doc.AppendToList("amendments", fmt.Sprintf("%02d", nn))
+		d.AppendToList("amendments", fmt.Sprintf("%02d", nn))
 	}
-	if err := doc.Save(); err != nil {
+	if err := d.Save(); err != nil {
 		return "", nil, exit.Wrap(exit.IOError, err, "cannot write "+tp)
 	}
 	logx.Info("task created issue=%d task=%s origin=%s deps=%v", issue, id, origin, dependsOn)
@@ -119,7 +121,7 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 
 // taskOrigin derives origin + pre-listed amendment NNs from the plan's
 // Amendments history (carried through MODIFYs).
-func taskOrigin(plan *Doc, id string) (string, []int) {
+func taskOrigin(plan *doc.Doc, id string) (string, []int) {
 	amendments := ParseAmendments(plan.Body)
 	var nns []int
 	origin := "plan"
@@ -161,23 +163,23 @@ func SetTaskStatus(issue int, id, input string) (from, to TaskStatus, err error)
 		return "", "", exit.New(exit.NotFound,
 			fmt.Sprintf("task file %s does not exist — tasks are JIT: 'orbit neocortex task new %s \"Name\"'", tp, id))
 	}
-	doc, err := ParseDoc(tp)
+	d, err := doc.ParseDoc(tp)
 	if err != nil {
 		return "", "", exit.New(exit.PreflightFailed, err.Error())
 	}
-	fromFile := doc.Get("status")
+	fromFile := d.Get("status")
 	from = statusFromFile(fromFile)
 	if err := CheckTransition(from, to); err != nil {
 		return "", "", err
 	}
 	// Preflight for → Revise.
 	if to == StatusRevise {
-		if err := checkReviseReadiness(tp, doc.Body); err != nil {
+		if err := checkReviseReadiness(tp, d.Body); err != nil {
 			return "", "", err
 		}
 	}
-	doc.Set("status", to.FileValue())
-	if err := doc.Save(); err != nil {
+	d.Set("status", to.FileValue())
+	if err := d.Save(); err != nil {
 		return "", "", exit.Wrap(exit.IOError, err, "cannot rewrite "+tp)
 	}
 	if err := appendCLILog(tp, from.FileValue(), to.FileValue()); err != nil {
@@ -205,12 +207,12 @@ func statusFromFile(s string) TaskStatus {
 // checkReviseReadiness: Completion Notes non-empty AND all `- [ ]` under
 // Verification ticked.
 func checkReviseReadiness(path string, body []byte) error {
-	notes := StripHTMLComments(BulletFormSection(body, "Completion Notes"))
+	notes := doc.StripHTMLComments(doc.BulletFormSection(body, "Completion Notes"))
 	if notes == "" {
 		return exit.New(exit.PreflightFailed,
 			fmt.Sprintf("%s: Completion Notes is empty — fill them before moving to Revise", path))
 	}
-	verif := BulletFormSection(body, "Verification")
+	verif := doc.BulletFormSection(body, "Verification")
 	if verif != nil {
 		for _, line := range strings.Split(string(verif), "\n") {
 			t := strings.TrimSpace(line)
@@ -258,7 +260,7 @@ type TaskInfo struct {
 
 // ListTasks returns rows for task list.
 func ListTasks(issue int) ([]TaskInfo, error) {
-	plan, err := ParseDoc(PlanPath(issue))
+	plan, err := doc.ParseDoc(PlanPath(issue))
 	if err != nil {
 		return nil, exit.New(exit.NotFound, "plan missing: "+PlanPath(issue))
 	}
@@ -272,8 +274,8 @@ func ListTasks(issue int) ([]TaskInfo, error) {
 		info.Origin, _ = taskOrigin(plan, t.ID)
 		tp := TaskPath(issue, t.ID)
 		if fsutil.Exists(tp) {
-			if doc, perr := ParseDoc(tp); perr == nil {
-				info.Status = doc.Get("status")
+			if d, perr := doc.ParseDoc(tp); perr == nil {
+				info.Status = d.Get("status")
 			}
 		}
 		if info.Status == "" {
@@ -285,7 +287,7 @@ func ListTasks(issue int) ([]TaskInfo, error) {
 				info.DepStatus = append(info.DepStatus, dep+":not created")
 				continue
 			}
-			if ddoc, perr := ParseDoc(depPath); perr == nil {
+			if ddoc, perr := doc.ParseDoc(depPath); perr == nil {
 				info.DepStatus = append(info.DepStatus, dep+":"+ddoc.Get("status"))
 			}
 		}

@@ -13,10 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/scaffold"
 )
 
 // IssueSource selects the Detail injection mode for issue new.
@@ -204,7 +206,7 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 		"REGISTRY_VERSION": deployedVersion,
 		"DETAIL":           detail,
 	}
-	concept, err := Render(stubContent(cache, "00-concept.stub.md"), issueVals)
+	concept, err := scaffold.Render(stubContent(cache, "00-concept.stub.md"), issueVals)
 	if err != nil {
 		return nil, exit.Wrap(exit.General, err, "cannot render concept stub")
 	}
@@ -214,7 +216,7 @@ func NewIssue(title string, src IssueSource) (*NewIssueResult, error) {
 		"DATE":             now,
 		"REGISTRY_VERSION": deployedVersion,
 	}
-	plan, err := Render(stubContent(cache, "01-plan.stub.md"), planVals)
+	plan, err := scaffold.Render(stubContent(cache, "01-plan.stub.md"), planVals)
 	if err != nil {
 		return nil, exit.Wrap(exit.General, err, "cannot render plan stub")
 	}
@@ -294,7 +296,7 @@ func resolveDetail(src IssueSource) (detail, source string, err error) {
 // LockIssue performs issue lock (§5.5) with ordered preflights.
 func LockIssue(n int) (string, error) {
 	path := ConceptPath(n)
-	doc, err := ParseDoc(path)
+	d, err := doc.ParseDoc(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", exit.New(exit.NotFound, fmt.Sprintf("concept file missing: %s", path))
@@ -302,23 +304,23 @@ func LockIssue(n int) (string, error) {
 		return "", exit.New(exit.PreflightFailed, err.Error())
 	}
 	// 1. Status must be Draft.
-	if doc.Get("Status") == string(ConceptLocked) {
+	if d.Get("Status") == string(ConceptLocked) {
 		return "", exit.New(exit.StateConflict, fmt.Sprintf("%s is already Locked — lock is one-way", path))
 	}
-	if doc.Get("Status") != string(ConceptDraft) {
+	if d.Get("Status") != string(ConceptDraft) {
 		return "", exit.New(exit.PreflightFailed,
-			fmt.Sprintf("%s has Status %q (must be %q)", path, doc.Get("Status"), ConceptDraft))
+			fmt.Sprintf("%s has Status %q (must be %q)", path, d.Get("Status"), ConceptDraft))
 	}
 	// 2–3. Body guards.
-	if err := GuardBody(path, doc.Body); err != nil {
+	if err := GuardBody(path, d.Body); err != nil {
 		return "", err
 	}
 	// Actions.
-	hash := LockHash(doc.Body)
-	doc.Set("Status", string(ConceptLocked))
-	doc.Set("Locked-At", time.Now().UTC().Format(time.RFC3339))
-	doc.Set("Lock-Hash", hash)
-	if err := doc.Save(); err != nil {
+	hash := LockHash(d.Body)
+	d.Set("Status", string(ConceptLocked))
+	d.Set("Locked-At", time.Now().UTC().Format(time.RFC3339))
+	d.Set("Lock-Hash", hash)
+	if err := d.Save(); err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot rewrite "+path)
 	}
 	logx.Info("issue lock | issue=%d | locked hash=%s", n, hash[:19]+"…")
@@ -358,7 +360,7 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 		// The folder suffix is authoritative; Class: quick must agree with it.
 		if IssueLane(n) == LaneQuick {
 			info.Lane = "quick"
-			qdoc, qerr := ParseDoc(QuickPath(n))
+			qdoc, qerr := doc.ParseDoc(QuickPath(n))
 			if qerr != nil {
 				info.Quick = "unreadable"
 				out = append(out, info)
@@ -375,14 +377,14 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 			continue
 		}
 		info.Lane = "full"
-		if doc, err := ParseDoc(ConceptPath(n)); err == nil {
-			info.Concept = doc.Get("Status")
-			if h1 := firstH1(doc.Body); h1 != "" {
+		if d, err := doc.ParseDoc(ConceptPath(n)); err == nil {
+			info.Concept = d.Get("Status")
+			if h1 := firstH1(d.Body); h1 != "" {
 				info.Title = strings.TrimPrefix(h1, "Concept: ")
 			}
 		}
-		if doc, err := ParseDoc(PlanPath(n)); err == nil {
-			info.Plan = doc.Get("Status")
+		if d, err := doc.ParseDoc(PlanPath(n)); err == nil {
+			info.Plan = d.Get("Status")
 		}
 		// Addenda counts.
 		if entries, err := os.ReadDir(AddendaDir(n)); err == nil {
@@ -390,8 +392,8 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 				if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 					continue
 				}
-				if doc, err := ParseDoc(filepath.Join(AddendaDir(n), e.Name())); err == nil {
-					switch doc.Get("Status") {
+				if d, err := doc.ParseDoc(filepath.Join(AddendaDir(n), e.Name())); err == nil {
+					switch d.Get("Status") {
 					case "Draft":
 						info.ConceptAddenda++
 					case "Approved":
@@ -413,8 +415,8 @@ func ListIssuesInfo() ([]IssueInfo, error) {
 				if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 					continue
 				}
-				if doc, err := ParseDoc(filepath.Join(TasksDir(n), e.Name())); err == nil {
-					info.TaskCounts[doc.Get("status")]++
+				if d, err := doc.ParseDoc(filepath.Join(TasksDir(n), e.Name())); err == nil {
+					info.TaskCounts[d.Get("status")]++
 				} else {
 					info.TaskCounts["unreadable"]++
 				}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/logx"
 )
@@ -14,7 +15,7 @@ import (
 // check), then plan preflights, then locked-at/hash/status.
 func LockPlan(n int) (*DAG, error) {
 	// Verify-first: hash-verify the concept before anything else.
-	concept, err := ParseDoc(ConceptPath(n))
+	concept, err := doc.ParseDoc(ConceptPath(n))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, exit.New(exit.NotFound, fmt.Sprintf("concept file missing: %s", ConceptPath(n)))
@@ -27,27 +28,27 @@ func LockPlan(n int) (*DAG, error) {
 
 	// Plan preflights.
 	planPath := PlanPath(n)
-	doc, err := ParseDoc(planPath)
+	d, err := doc.ParseDoc(planPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, exit.New(exit.NotFound, fmt.Sprintf("plan file missing: %s", planPath))
 		}
 		return nil, exit.New(exit.PreflightFailed, err.Error())
 	}
-	switch doc.Get("Status") {
+	switch d.Get("Status") {
 	case string(PlanLocked):
 		return nil, exit.New(exit.StateConflict, fmt.Sprintf("%s is already Locked — lock is one-way", planPath))
 	case string(PlanDraft):
 	default:
 		return nil, exit.New(exit.PreflightFailed,
-			fmt.Sprintf("%s has Status %q (must be %q)", planPath, doc.Get("Status"), PlanDraft))
+			fmt.Sprintf("%s has Status %q (must be %q)", planPath, d.Get("Status"), PlanDraft))
 	}
-	if err := GuardBody(planPath, doc.Body); err != nil {
+	if err := GuardBody(planPath, d.Body); err != nil {
 		return nil, err
 	}
 
 	// Open Questions must have no unticked checkboxes.
-	oq := Section(doc.Body, "Open Questions")
+	oq := doc.Section(d.Body, "Open Questions")
 	if oq != nil {
 		for _, line := range strings.Split(string(oq), "\n") {
 			t := strings.TrimSpace(line)
@@ -60,7 +61,7 @@ func LockPlan(n int) (*DAG, error) {
 	}
 
 	// Task DAG must parse.
-	dagSec := Section(doc.Body, "Task DAG")
+	dagSec := doc.Section(d.Body, "Task DAG")
 	if dagSec == nil {
 		return nil, exit.New(exit.PreflightFailed, fmt.Sprintf("%s has no '## Task DAG' section", planPath))
 	}
@@ -70,11 +71,11 @@ func LockPlan(n int) (*DAG, error) {
 	}
 
 	// Actions.
-	hash := LockHash(doc.Body)
-	doc.Set("Status", string(PlanLocked))
-	doc.Set("Locked-At", time.Now().UTC().Format(time.RFC3339))
-	doc.Set("Lock-Hash", hash)
-	if err := doc.Save(); err != nil {
+	hash := LockHash(d.Body)
+	d.Set("Status", string(PlanLocked))
+	d.Set("Locked-At", time.Now().UTC().Format(time.RFC3339))
+	d.Set("Lock-Hash", hash)
+	if err := d.Save(); err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+planPath)
 	}
 	logx.Info("plan lock | issue=%d | tasks=%d | locked hash=%s", n, len(dag.Tasks), hash[:19]+"…")
@@ -82,8 +83,8 @@ func LockPlan(n int) (*DAG, error) {
 }
 
 // EffectiveDAG parses the plan's Task DAG section (as amended).
-func EffectiveDAG(planDoc *Doc) (*DAG, error) {
-	dagSec := Section(planDoc.Body, "Task DAG")
+func EffectiveDAG(planDoc *doc.Doc) (*DAG, error) {
+	dagSec := doc.Section(planDoc.Body, "Task DAG")
 	if dagSec == nil {
 		return nil, exit.New(exit.PreflightFailed,
 			fmt.Sprintf("%s has no '## Task DAG' section", planDoc.Path))
@@ -103,7 +104,7 @@ var amendmentRe = regexpAmendment()
 
 // ParseAmendments extracts all Amendments lines in order.
 func ParseAmendments(body []byte) []Amendment {
-	sec := Section(body, "Amendments")
+	sec := doc.Section(body, "Amendments")
 	if sec == nil {
 		return nil
 	}

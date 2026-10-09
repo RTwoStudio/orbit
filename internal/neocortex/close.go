@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 )
@@ -25,11 +26,11 @@ func BuildCloseReport(n int) (*CloseReport, error) {
 		return nil, exit.New(exit.StateConflict,
 			fmt.Sprintf("issue %d is a quick run — close it with: orbit neocortex quick close %d", n, n))
 	}
-	concept, err := ParseDoc(ConceptPath(n))
+	concept, err := doc.ParseDoc(ConceptPath(n))
 	if err != nil {
 		return nil, exit.New(exit.NotFound, "concept missing: "+ConceptPath(n))
 	}
-	plan, err := ParseDoc(PlanPath(n))
+	plan, err := doc.ParseDoc(PlanPath(n))
 	if err != nil {
 		return nil, exit.New(exit.NotFound, "plan missing: "+PlanPath(n))
 	}

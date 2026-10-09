@@ -17,6 +17,7 @@ import (
 	"github.com/RTwoStudio/orbit/internal/neocortex"
 	"github.com/RTwoStudio/orbit/internal/prompt"
 	"github.com/RTwoStudio/orbit/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/scaffold"
 )
 
 // StepReport is one row of the install/update summary table.
@@ -78,7 +79,7 @@ func fetchRegistry(cfg *config.Config, registryURLFlag, refFlag string) (*regist
 	// Validate every stub against its known token set at cache time (§10).
 	for _, e := range fc.Manifest.Files.Stubs {
 		name := filepath.Base(e.Path)
-		if err := neocortex.ValidateStub(name, fc.Content[e.Path]); err != nil {
+		if err := scaffold.ValidateStub(name, fc.Content[e.Path]); err != nil {
 			return nil, exit.New(exit.RegistryUnreachable,
 				"registry integrity: stub validation failed: "+err.Error())
 		}

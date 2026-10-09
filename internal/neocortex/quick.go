@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/doc"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 	"github.com/RTwoStudio/orbit/internal/registry"
+	"github.com/RTwoStudio/orbit/internal/scaffold"
 )
 
 // NewQuickResult summarizes what quick new created.
@@ -55,7 +57,7 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 		return nil, exit.New(exit.StateConflict, fmt.Sprintf("issue %d already exists — refusing to overwrite", n))
 	}
 
-	rendered, err := Render(stub, map[string]string{
+	rendered, err := scaffold.Render(stub, map[string]string{
 		"ISSUE_ID":         fmt.Sprintf("%d", n),
 		"ISSUE_TITLE":      title,
 		"DATE":             time.Now().UTC().Format(time.RFC3339),
@@ -95,14 +97,14 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 
 // QuickStatusOf reads a quick run's status.
 func QuickStatusOf(n int) (QuickStatus, error) {
-	doc, err := ParseDoc(QuickPath(n))
+	d, err := doc.ParseDoc(QuickPath(n))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", exit.New(exit.NotFound, fmt.Sprintf("quick file missing: %s", QuickPath(n)))
 		}
 		return "", exit.New(exit.PreflightFailed, err.Error())
 	}
-	return quickStatusFromFile(doc.Get("Status")), nil
+	return quickStatusFromFile(d.Get("Status")), nil
 }
 
 // SetQuickStatus applies a validated quick transition, appending a CLI log
@@ -112,21 +114,21 @@ func SetQuickStatus(n int, to QuickStatus) (QuickStatus, error) {
 	if !fsutil.Exists(path) {
 		return "", exit.New(exit.NotFound, fmt.Sprintf("quick file missing: %s", path))
 	}
-	doc, err := ParseDoc(path)
+	d, err := doc.ParseDoc(path)
 	if err != nil {
 		return "", exit.New(exit.PreflightFailed, err.Error())
 	}
-	from := quickStatusFromFile(doc.Get("Status"))
+	from := quickStatusFromFile(d.Get("Status"))
 	if err := CheckQuickTransition(from, to); err != nil {
 		return "", err
 	}
 	if to == QuickClose {
-		if err := checkQuickResult(path, doc.Body); err != nil {
+		if err := checkQuickResult(path, d.Body); err != nil {
 			return "", err
 		}
 	}
-	doc.Set("Status", to.FileValue())
-	if err := doc.Save(); err != nil {
+	d.Set("Status", to.FileValue())
+	if err := d.Save(); err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot rewrite "+path)
 	}
 	if err := appendCLILog(path, from.FileValue(), to.FileValue()); err != nil {
@@ -139,7 +141,7 @@ func SetQuickStatus(n int, to QuickStatus) (QuickStatus, error) {
 // checkQuickResult requires the ## Result section to carry real content
 // (HTML comments do not count).
 func checkQuickResult(path string, body []byte) error {
-	if StripHTMLComments(Section(body, "Result")) == "" {
+	if doc.StripHTMLComments(doc.Section(body, "Result")) == "" {
 		return exit.New(exit.PreflightFailed,
 			fmt.Sprintf("%s: ## Result is empty — record what was done before Close", path),
 			"fill Result, then retry the close")
@@ -153,7 +155,7 @@ func checkQuickResult(path string, body []byte) error {
 // folder move, no restart.
 func PromoteQuick(n int) (string, error) {
 	quickPath := QuickPath(n)
-	qdoc, err := ParseDoc(quickPath)
+	qdoc, err := doc.ParseDoc(quickPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", exit.New(exit.NotFound, fmt.Sprintf("quick file missing: %s", quickPath))
@@ -178,7 +180,7 @@ func PromoteQuick(n int) (string, error) {
 	}
 
 	title := quickTitle(qdoc)
-	intent := strings.TrimSpace(StripHTMLComments(Section(qdoc.Body, "Intent")))
+	intent := strings.TrimSpace(doc.StripHTMLComments(doc.Section(qdoc.Body, "Intent")))
 	detail := fmt.Sprintf("<!-- Promoted from quick run issue %d. The original Intent follows. -->\n\n%s", n, intent)
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -195,11 +197,11 @@ func PromoteQuick(n int) (string, error) {
 	}
 	conceptVals["DETAIL"] = detail
 
-	concept, err := Render(conceptStub, conceptVals)
+	concept, err := scaffold.Render(conceptStub, conceptVals)
 	if err != nil {
 		return "", exit.Wrap(exit.General, err, "cannot render concept stub")
 	}
-	plan, err := Render(planStub, vals)
+	plan, err := scaffold.Render(planStub, vals)
 	if err != nil {
 		return "", exit.Wrap(exit.General, err, "cannot render plan stub")
 	}
@@ -236,11 +238,11 @@ func PromoteQuick(n int) (string, error) {
 }
 
 // quickTitle derives the plain title from a quick file's H1 ("# Quick: X").
-func quickTitle(doc *Doc) string {
-	if h1 := firstH1(doc.Body); h1 != "" {
+func quickTitle(d *doc.Doc) string {
+	if h1 := firstH1(d.Body); h1 != "" {
 		return strings.TrimSpace(strings.TrimPrefix(h1, "Quick: "))
 	}
-	return fmt.Sprintf("Issue %s", doc.Get("Issue-ID"))
+	return fmt.Sprintf("Issue %s", d.Get("Issue-ID"))
 }
 
 // injectIntoSection inserts text at the end of a named "## " section, before
