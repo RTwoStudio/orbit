@@ -18,6 +18,10 @@ orbit neocortex plan         # lock
 orbit neocortex addenda      # new | list | show | approve | apply
 orbit neocortex task         # new | start | revise | close | rework | list | show | next
 orbit neocortex close        # verify a default-lane issue is complete (read-only)
+orbit cycles install         # first contact: fetch → cache → deploy → bootstrap the vault
+orbit cycles work            # new | shape | bet | shelve | unshelve | deliver | list | show
+orbit cycles cycle           # new | close | list | show
+orbit cycles status          # board: current cycle + backlog ladder
 orbit completion             # install bash/zsh/fish/powershell completion
 ```
 
@@ -33,42 +37,76 @@ are verbs, never `--set`: `quick` and `task` share the short verbs
 `start | revise | close | rework`. `plan`, `addenda`, `task`, `quick`, and
 `close` act on the ACTIVE issue; `issue <verb> [N]` addresses one by number.
 
-## Registry contract (v0.1.0)
+## Domains: Cycles and NeoCortex
+
+Orbit ships two domains, one per level of abstraction:
+
+- **Cycles** — the **planning and commitment** layer. It answers *what should
+  we work on, why, and when are we committing to it?* Work items (`W-####`)
+  are captured, shaped, and bet into time-boxed cycles (`C-####`) whose
+  Markdown lives in a global vault (`<vault.dir>/Cycles/`).
+- **NeoCortex** — the **engineering execution** layer. It answers *how do we
+  actually build it?* Issues, plans, and tasks live in a project's
+  `.neocortex/`.
+
+They are two levels of one system, not competing trackers: one planning
+tracker (Cycles) and one execution tracker (NeoCortex). The handoff is
+**one-way** and read-only across the boundary — Cycles reads a project's
+`.neocortex/` only as evidence and never mutates it, and both degrade
+gracefully when unlinked. The bridge is the pair `{project dir, issue:int}`
+(NeoCortex tasks stay `T1..Tn`; there is no synthetic cross-system ID).
+Only a human marks a Cycles item `Delivered`.
+
+## Registry contract (neocortex 0.7.0 · cycles 0.1.0)
 
 The registry is a git repo (default GitHub). Everything deployable lives
-under `neocortex/`; `README.md` is repo documentation and is never deployed.
+under the domain folders — `neocortex/` and the sibling `cycles/` tree;
+`README.md` is repo documentation and is never deployed.
 
 ```
 <registry-repo>/
 ├── README.md                    # never deployed
-└── neocortex/
-    ├── manifest.json            # version anchor: version + layout + sha256 per file
-    ├── NEOCORTEX.md             # → project root (copy-if-missing only)
-    ├── stubs/*.stub.md          # → global cache (~/.config/orbit/neocortex/cache/stubs/)
+├── neocortex/
+│   ├── manifest.json            # version anchor: version + layout + sha256 per file
+│   ├── NEOCORTEX.md             # workflow reference (kept in the registry; not copied into projects)
+│   ├── stubs/*.stub.md          # → global cache (~/.config/orbit/neocortex/cache/stubs/)
+│   └── opencode/
+│       ├── agents/*.md          # → <opencode.dir>/agents/  (default ~/.config/opencode)
+│       └── commands/*.md        # → <opencode.dir>/commands/
+└── cycles/
+    ├── manifest.json            # cycles version anchor (its own version + sha256 per file)
+    ├── CYCLES.md                # → <vault.dir>/Cycles/ (copy-if-missing only)
+    ├── stubs/*.stub.md          # → global cache (~/.config/orbit/cycles/cache/stubs/)
     └── opencode/
-        ├── agents/*.md          # → <opencode.dir>/agents/  (default ~/.config/opencode)
-        └── commands/*.md        # → <opencode.dir>/commands/
+        ├── agents/cycles.md     # → <opencode.dir>/agents/
+        └── commands/cycles:*.md # → <opencode.dir>/commands/
 ```
 
 Mapping rules:
 
-- Everything under `opencode/` maps 1:1 into the opencode dir; future
-  subfolders inherit the rule.
-- `stubs/` and `NEOCORTEX.md` follow their specific rules above.
-- `manifest.json` lists **every** deployable file with its sha256. The CLI
-  verifies each file at fetch time; a mismatch is a registry-integrity
-  failure (exit 4) and nothing is deployed. The manifest never lists itself.
-- `deployed.json` (`~/.config/orbit/neocortex/deployed.json`) records what
-  was deployed: relpath → {version, sha256, deployed_at}. Keys mirror
-  manifest paths.
-- All `path` values are relative to `neocortex/`; paths that escape
-  (`../`, absolute) are refused.
+- Everything under a domain's `opencode/` maps 1:1 into the opencode dir;
+  future subfolders inherit the rule.
+- `stubs/` follow their domain's cache rule; `NEOCORTEX.md` stays in the
+  registry (it is never copied into a project), and `cycles/CYCLES.md` is
+  copied into the vault (copy-if-missing only).
+- Each domain has its **own** `manifest.json` listing **every** deployable
+  file with its sha256. The CLI verifies each file at fetch time; a mismatch
+  is a registry-integrity failure (exit 4) and nothing is deployed. A
+  manifest never lists itself.
+- The global cache and `deployed.json` are **namespaced per domain**
+  (`~/.config/orbit/<domain>/…`); `deployed.json` records what was deployed
+  (relpath → {version, sha256, deployed_at}) with keys mirroring that
+  domain's manifest paths.
+- All `path` values are relative to the domain folder (`neocortex/` or
+  `cycles/`); paths that escape (`../`, absolute) are refused.
 
-Regenerating the manifest is mechanical and must never be hand-edited. The
-registry repo ships the generator:
+Regenerating the manifests is mechanical and must never be hand-edited. The
+registry repo ships one generator that rewrites **both** domains' manifests
+(each domain versions independently):
 
 ```sh
 # in the registry repo
+scripts/manifest.sh generate     # rehash both manifests, no version bump
 scripts/manifest.sh bump patch   # or minor / major
 ```
 
@@ -117,7 +155,7 @@ opencode:
 neocortex:
   dir: .neocortex
 vault:
-  dir: ~/.orbit-vault               # reserved (future)
+  dir: ~/.orbit-vault               # Cycles vault root; the domain lives in <dir>/Cycles/
 ui:
   color: auto                       # auto (TTY-only) | always | never; NO_COLOR and --no-color also win
 ```
@@ -215,11 +253,12 @@ Source overrides (mirroring `install.sh`): `ORBIT_GH_REPO`, `ORBIT_GH_API`,
 binary path comes from `os.Executable()` (symlinks resolved) or
 `ORBIT_BIN_DIR/<orbit>`.
 
-`orbit update` (top-level) is different: it refreshes **registry assets**
-(cache + opencode agents/commands). It writes only `~/.config`, so it runs in
-any directory — no project setup gate. `orbit neocortex update` still works as
-a deprecated alias. Use `--prune` to delete orphaned deployed assets (only
-files the CLI deployed and that you haven't edited since).
+`orbit update` (top-level) is different: it refreshes **both domains'**
+registry assets (each domain's cache + opencode agents/commands). It writes
+only `~/.config`, so it runs in any directory — no project setup gate.
+`orbit neocortex update` still works as a deprecated alias. Use `--prune` to
+delete orphaned deployed assets (only files the CLI deployed and that you
+haven't edited since).
 
 ## Registries: GitHub and GitLab
 
@@ -278,7 +317,10 @@ one-line load step, and is safe to re-run. Override the target directory with
   `00-quick.md`. `quick promote <N>` converts it to the default lane in place.
 - **`close` exists** and is read-only: it verifies every task is `Close` and
   prints the report. Quick runs close through `quick close <N>`.
+- **Cycles domain.** `orbit cycles` adds the vault-rooted planning layer
+  (`work`/`cycle`/`status`) beside neocortex; `orbit cycles install` (alias
+  `init`) bootstraps `<vault.dir>/Cycles/` idempotently.
 - Update touches only global state (cache, opencode assets,
-  `deployed.json`) — never the project.
+  `deployed.json`) — never the project or the vault.
 - Only install/update ever prompt. Domain commands are deterministic and
   agent-safe.

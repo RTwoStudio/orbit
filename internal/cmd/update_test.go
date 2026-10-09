@@ -146,6 +146,40 @@ func TestUpdateRefreshesBothDomains(t *testing.T) {
 	}
 }
 
+// TestUpdateJSONCommandLabel pins the global verb's --json envelope label: the
+// two-domain `orbit update` reports "update", not the old neocortex-scoped
+// "neocortex update".
+func TestUpdateJSONCommandLabel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := t.TempDir()
+	writeCmdDomainFixture(t, root, domain.NeoCortex, map[string]string{
+		"stubs/00-concept.stub.md":     "{{ISSUE_ID}}",
+		"opencode/agents/neocortex.md": "# neocortex\n",
+	})
+	withFixtureFetcher(t, root)
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(cfgPath, []byte("registry:\n  url: https://example.invalid/registry.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, err := runCycles(t, cfgPath, "update", "--json")
+	if err != nil {
+		t.Fatalf("update --json: %v", err)
+	}
+	// `orbit update` writes a human "Deployed version:" line after the JSON on
+	// the same stream, so decode just the leading JSON value.
+	var env installEnvelope
+	dec := json.NewDecoder(strings.NewReader(out))
+	if err := dec.Decode(&env); err != nil {
+		t.Fatalf("invalid JSON %q: %v", out, err)
+	}
+	if env.Command != "update" {
+		t.Errorf("update --json command = %q, want %q", env.Command, "update")
+	}
+}
+
 func TestUpdateRejectsBadCyclesStub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

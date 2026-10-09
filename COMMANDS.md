@@ -1,6 +1,6 @@
 # Orbit CLI — Complete Command Reference
 
-**Version:** v0.2.0 · **Registry:** 0.6.0
+**Version:** v0.2.0 · **Registry:** neocortex 0.7.0 · cycles 0.1.0
 
 Every command, every operand, every flag. For the narrative of what changed
 from v0.1.0, see the changelog section at the bottom.
@@ -21,6 +21,10 @@ orbit <group> <subgroup> <verb> [operands...] [flags]
   (`issues/0001-issue/`).
   - *default* (unmarked) — the full protocol: concept → plan → task DAG.
   - *quick* (`Class: quick`) — one-sitting work in a single `00-quick.md`.
+- **Two domains:** `neocortex` (project-rooted engineering execution, under
+  `.neocortex/`) and `cycles` (vault-rooted planning & commitment, under
+  `<vault.dir>/Cycles/`). The handoff is one-way; Cycles reads `.neocortex/`
+  as evidence only and never mutates it.
 - **The CLI owns frontmatter.** Status changes happen only through verbs; never
   edit `Status`, locks, or hashes by hand.
 
@@ -425,6 +429,138 @@ Exit codes: 0 · 5 · 6 · 7 · 9.
 
 ---
 
+# `orbit cycles` — planning & commitment domain
+
+The vault-rooted planning layer that sits beside the project-rooted `neocortex`
+domain. Work items are captured, shaped, and bet into time-boxed cycles; the
+vault's Markdown is the source of truth, and NeoCortex consumes the one-way
+handoff for execution. The vault root resolves as `--vault` (one-shot override)
+> `config.vault.dir`.
+
+The `cycles` group and every subcommand carry the persistent `--vault <dir>`
+flag; `--json` (global) is first-class on every read verb.
+
+Lifecycle: work `Backlog → Pitched → Bet → Delivered` (`Shelved` reachable from
+the pre-bet/bet stages; `unshelve` returns to `Pitched`); cycles `Open →
+Closed`. Illegal moves are `state_conflict` (7). Files move only across the
+`backlog/` ↔ `cycles/C-####/` boundary; every other change is frontmatter-only.
+
+## Setup
+
+### `orbit cycles install` (alias `init`)
+
+First-contact setup: fetch the registry → populate the cycles cache → deploy
+the cycles opencode agent/commands → bootstrap `<vault>/Cycles/` (`CYCLES.md`,
+empty `CURRENT`, `backlog/`, `cycles/`). Copy-if-missing only, so re-running is
+a no-op and a locally edited `CYCLES.md` is preserved. Vault-gated (not
+project-gated): it never touches a project's `.neocortex/`.
+
+Exit codes: 0 · 3 · 4 · 7 · 10.
+
+```sh
+orbit cycles install                       # use config vault.dir
+orbit cycles init --vault ~/orbit-vault     # explicit vault root
+```
+
+## `orbit cycles work` — work items
+
+### `work new "<title>" --scope <s>`
+
+Create a `W-####` work item in `backlog/` as `Backlog`.
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--scope` | string | project surface (required; e.g. `delijan-driver-app`) |
+
+Preflight: title + scope non-empty (exit 6); vault initialized (exit 11).
+Exit codes: 0 · 2 · 4 · 6 · 10 · 11.
+
+### `work shape <W-####> --appetite big|small`
+
+`Backlog → Pitched`, stamping the appetite.
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--appetite` | string | `big` \| `small` (required) |
+
+Preflight: item is `Backlog` (else exit 7); appetite valid (exit 6); the
+`## Problem`, `## Solution Sketch`, `## Rabbit Holes`, and `## No-gos` sections
+are all non-empty (exit 6).
+Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
+
+### `work bet|shelve|unshelve|deliver <W-####>`
+
+| Verb | Transition | Preflight |
+|---|---|---|
+| `bet` | `Pitched → Bet` (moves into `cycles/C-####/`) | item is `Pitched`; a current cycle is open (else exit 7) |
+| `shelve` | `Backlog`/`Pitched`/`Bet` → `Shelved` (returns to `backlog/` if committed) | legal source status (else exit 7) |
+| `unshelve` | `Shelved → Pitched` | item is `Shelved` (else exit 7) |
+| `deliver` | `Bet → Delivered` (terminal; stays in the cycle folder) | item is `Bet` (else exit 7); human-only by convention |
+
+Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
+
+### `work list [--status <s>] [--scope <s>]`
+
+Table `ID · TITLE · STATUS · SCOPE · CYCLE` over `backlog/` and every cycle.
+`--status` is case-insensitive; `--scope` is an exact match. `--json` emits the
+typed slice.
+
+Exit codes: 0 · 2 · 6 · 10.
+
+### `work show <W-####>`
+
+Human output prints the note verbatim; `--json` emits the typed `WorkItem`.
+
+Exit codes: 0 · 2 · 5 · 6 · 10.
+
+## `orbit cycles cycle` — cycles
+
+### `cycle new "<goal>" --release <semver> [--start <date>] [--end <date>]`
+
+Open the next `C-####` cycle and point `CURRENT` at it.
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--release` | string | strict `MAJOR.MINOR.PATCH` (required) |
+| `--start` | string | `YYYY-MM-DD` (default: today UTC) |
+| `--end` | string | `YYYY-MM-DD` (default: start + 6 weeks) |
+
+Preflight: goal non-empty (exit 6); valid release (exit 6); vault initialized
+(exit 11); no cycle already open (exit 7); valid dates, end ≥ start (exit 6).
+Exit codes: 0 · 2 · 4 · 6 · 7 · 10 · 11.
+
+### `cycle close`
+
+Close the open cycle: every non-`Delivered` bet is auto-shelved back to
+`backlog/` as `Shelved` (recording the cycle in its `history`), the cycle is
+marked `Closed`, and `CURRENT` is cleared. Human-only by convention.
+
+Preflight: a cycle is open and not already `Closed` (else exit 7).
+Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
+
+### `cycle list`
+
+Table `ID · GOAL · RELEASE · STATUS · START · END`; `--json` emits the slice.
+
+Exit codes: 0 · 2 · 10.
+
+### `cycle show <C-####>`
+
+Human output prints the cycle note verbatim; `--json` emits the typed `Cycle`
+including its regenerated `## Bets` view.
+
+Exit codes: 0 · 2 · 5 · 6 · 10.
+
+## `orbit cycles status`
+
+Render the board: the open cycle (or "No open cycle.") plus the labelled
+`Backlog` / `Pitched` / `Shelved` blocks. Read-only. `--json` emits the typed
+`StatusBoard` (`{current, backlog}`).
+
+Exit codes: 0 · 2 · 3 · 5 · 10.
+
+---
+
 # Flag summary (non-global)
 
 | Command | Flags |
@@ -434,6 +570,12 @@ Exit codes: 0 · 5 · 6 · 7 · 9.
 | `orbit completion` | `--script`, `--uninstall` |
 | `orbit neocortex install` | `--registry`, `--ref`, `--global-only` |
 | `orbit neocortex issue list` | `--lane=quick\|full`, `--status <s>` |
+| `orbit cycles` (group + all subcommands) | `--vault <dir>` (persistent) |
+| `orbit cycles work new` | `--scope <s>` (required) |
+| `orbit cycles work shape` | `--appetite big\|small` (required) |
+| `orbit cycles work list` | `--status <s>`, `--scope <s>` |
+| `orbit cycles cycle new` | `--release <semver>` (required), `--start <date>`, `--end <date>` |
+| `orbit cycles work show` / `cycle show` | `--json` |
 | all other commands | operands only (+ global flags) |
 
 ---
@@ -463,6 +605,19 @@ orbit neocortex addenda apply 1
 # Intake from elsewhere
 orbit neocortex quick import 42 "Retry limit on the client"
 orbit neocortex issue ingest spec.md "Add streaming API"
+
+# Cycles (planning & commitment)
+orbit cycles install                                          # bootstrap <vault.dir>/Cycles/
+orbit cycles work new "Voice search" --scope delijan-driver-app
+orbit cycles work shape W-0001 --appetite small              # after filling the shape sections
+orbit cycles cycle new "Driver search hardening" --release 0.3.0
+orbit cycles work bet W-0001
+orbit cycles work deliver W-0001                             # human-only
+orbit cycles work new "Offline mode" --scope delijan-driver-app
+orbit cycles work shape W-0002 --appetite big
+orbit cycles work bet W-0002
+orbit cycles cycle close                                     # W-0002 → backlog/ (Shelved); CURRENT cleared
+orbit cycles status --json                                   # board: current cycle + backlog ladder
 
 # Housekeeping
 orbit update --yes                     # refresh registry assets (global)

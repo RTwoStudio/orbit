@@ -91,13 +91,13 @@ func runUpdate(cmd *cobra.Command, registryURL, ref string, prune bool) error {
 					Detail: fmt.Sprintf("no %s/ domain in registry", dom.Base)})
 				continue
 			}
-			printSummary(cmd, "update", steps)
+			printSummaryAs(cmd, "update", "update", steps)
 			return requiredDomainError(dom, err)
 		}
 		versions = append(versions, deployedVersionLine(dom, deployed, fc.Manifest.Version))
 	}
 
-	printSummary(cmd, "update", steps)
+	printSummaryAs(cmd, "update", "update", steps)
 	for _, v := range versions {
 		fmt.Fprintln(cmd.OutOrStderr(), v)
 	}

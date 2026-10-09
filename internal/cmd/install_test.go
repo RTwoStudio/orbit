@@ -55,6 +55,37 @@ type installEnvelope struct {
 	Steps   []StepReport `json:"steps"`
 }
 
+// TestNeocortexInstallJSONCommandLabel pins the neocortex install --json
+// envelope label at "neocortex install" — the cleanup that fixed `orbit update`
+// must leave the neocortex callsite byte-identical.
+func TestNeocortexInstallJSONCommandLabel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ORBIT_NO_COMPLETION", "1")
+
+	regRoot := t.TempDir()
+	writeCmdDomainFixture(t, regRoot, domain.NeoCortex, map[string]string{
+		"stubs/00-concept.stub.md":     "{{ISSUE_ID}}",
+		"opencode/agents/neocortex.md": "# neocortex\n",
+	})
+	withFixtureFetcher(t, regRoot)
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(cfgPath, []byte("registry:\n  url: https://example.invalid/registry.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// --global-only skips the project gate + bootstrap, so this never writes
+	// into the source tree; the JSON envelope is what's under test.
+	out, _, err := runCycles(t, cfgPath, "neocortex", "install", "--global-only", "--json")
+	if err != nil {
+		t.Fatalf("neocortex install --json: %v", err)
+	}
+	env := decodeJSON[installEnvelope](t, out)
+	if env.Command != "neocortex install" {
+		t.Errorf("neocortex install --json command = %q, want %q", env.Command, "neocortex install")
+	}
+}
+
 func TestCyclesInstallBootstrapsVault(t *testing.T) {
 	vault := t.TempDir()
 	cfgPath := setupCyclesInstall(t, vault)
