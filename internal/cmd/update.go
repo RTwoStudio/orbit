@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/RTwoStudio/orbit/internal/config"
 	"github.com/RTwoStudio/orbit/internal/deploy"
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/prompt"
+	"github.com/RTwoStudio/orbit/internal/registry"
 )
 
 // newUpdateCmd builds the top-level `orbit update`: a global refresh of the
@@ -56,23 +59,14 @@ Example:
 }
 
 // runUpdate is shared by `orbit update` (global) and the deprecated
-// `orbit neocortex update` alias.
+// `orbit neocortex update` alias. It refreshes every known domain: neocortex
+// is required, cycles optional (a missing cycles/ manifest is a soft skip).
 func runUpdate(cmd *cobra.Command, registryURL, ref string, prune bool) error {
 	cfg, err := config.Load(flagConfig)
 	if err != nil {
 		return err
 	}
-	fc, err := fetchRegistry(cfg, registryURL, ref)
-	if err != nil {
-		return err
-	}
-	var steps []StepReport
-	steps = append(steps, StepReport{Step: "fetch", Action: "ok",
-		Detail: fmt.Sprintf("registry version %s", fc.Manifest.Version)})
-	steps = append(steps, populateCache(fc))
-
 	ocDir := deploy.OpenCodeDir(cfg.OpenCode.Dir)
-	deployed := deploy.LoadDeployed()
 	ask := func(msg string, def bool) bool {
 		if flagYes {
 			return def
@@ -83,19 +77,62 @@ func runUpdate(cmd *cobra.Command, registryURL, ref string, prune bool) error {
 		}
 		return prompt.Confirm(msg, def, false)
 	}
-	decisions, err := deploy.UpdateMode(fc, ocDir, deployed, ask, prune)
-	for _, d := range decisions {
-		steps = append(steps, StepReport{Step: "deploy " + d.Path, Action: d.Action,
-			Detail: d.Detail, Path: d.Target})
-	}
-	if err != nil {
-		printSummary(cmd, "update", steps)
-		return err
+
+	var (
+		steps    []StepReport
+		versions []string
+	)
+	for _, dom := range domain.All {
+		domSteps, fc, deployed, err := updateDomain(cfg, dom, registryURL, ref, ocDir, ask, prune)
+		steps = append(steps, domSteps...)
+		if err != nil {
+			if errors.Is(err, registry.ErrDomainAbsent) && !domain.IsRequired(dom) {
+				steps = append(steps, StepReport{Step: stepName(dom, "fetch"), Action: "skipped",
+					Detail: fmt.Sprintf("no %s/ domain in registry", dom.Base)})
+				continue
+			}
+			printSummary(cmd, "update", steps)
+			return requiredDomainError(dom, err)
+		}
+		versions = append(versions, deployedVersionLine(dom, deployed, fc.Manifest.Version))
 	}
 
 	printSummary(cmd, "update", steps)
-	deployedVersion := deployedVersionOf(deployed, fc.Manifest.Version)
-	final := fmt.Sprintf("Deployed version: %s (registry: %s)", deployedVersion, fc.Manifest.Version)
-	fmt.Fprintln(cmd.OutOrStderr(), final)
+	for _, v := range versions {
+		fmt.Fprintln(cmd.OutOrStderr(), v)
+	}
 	return nil
+}
+
+// updateDomain fetches, caches, and deploys a single domain, returning its
+// step rows and the resulting ledger. A real failure (network, integrity)
+// keeps its error; a missing optional domain surfaces as
+// registry.ErrDomainAbsent for the caller to soft-skip.
+func updateDomain(cfg *config.Config, dom domain.Domain, registryURL, ref, ocDir string, ask deploy.PromptFunc, prune bool) ([]StepReport, *registry.Fetched, deploy.Deployed, error) {
+	var steps []StepReport
+	fc, err := fetchRegistry(cfg, dom, registryURL, ref)
+	if err != nil {
+		return steps, nil, nil, err
+	}
+	steps = append(steps, StepReport{Step: stepName(dom, "fetch"), Action: "ok",
+		Detail: fmt.Sprintf("registry version %s", fc.Manifest.Version)})
+	steps = append(steps, populateCache(fc, dom))
+
+	deployed := deploy.LoadDeployed(dom)
+	decisions, err := deploy.UpdateMode(fc, dom, ocDir, deployed, ask, prune)
+	for _, d := range decisions {
+		steps = append(steps, StepReport{Step: stepName(dom, "deploy "+d.Path), Action: d.Action,
+			Detail: d.Detail, Path: d.Target})
+	}
+	return steps, fc, deployed, err
+}
+
+// deployedVersionLine formats the per-domain closing line. NeoCortex keeps the
+// exact pre-domain-generic wording; other domains are qualified by name.
+func deployedVersionLine(dom domain.Domain, deployed deploy.Deployed, registryVersion string) string {
+	v := deployedVersionOf(deployed, registryVersion)
+	if dom == domain.NeoCortex {
+		return fmt.Sprintf("Deployed version: %s (registry: %s)", v, registryVersion)
+	}
+	return fmt.Sprintf("Deployed version [%s]: %s (registry: %s)", dom.Name, v, registryVersion)
 }

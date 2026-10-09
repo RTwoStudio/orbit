@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/RTwoStudio/orbit/internal/config"
 	"github.com/RTwoStudio/orbit/internal/deploy"
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
@@ -45,9 +47,9 @@ func setupGate(cmdName string) error {
 	return nil
 }
 
-// newFetcher builds the registry fetcher; a var so tests can serve a
-// local fixture instead of the network.
-var newFetcher = func(cfg *config.Config, urlFlag, refFlag string) registry.Fetcher {
+// newFetcher builds the registry fetcher for one domain; a var so tests can
+// serve a local fixture instead of the network.
+var newFetcher = func(cfg *config.Config, d domain.Domain, urlFlag, refFlag string) registry.Fetcher {
 	url := cfg.Registry.URL
 	if urlFlag != "" {
 		url = urlFlag
@@ -56,17 +58,23 @@ var newFetcher = func(cfg *config.Config, urlFlag, refFlag string) registry.Fetc
 	if refFlag != "" {
 		ref = refFlag
 	}
-	return registry.RemoteFetcher{URL: url, Ref: ref, TokenEnv: cfg.Tokens.Registry}
+	return registry.RemoteFetcher{URL: url, Ref: ref, TokenEnv: cfg.Tokens.Registry, Domain: d}
 }
 
 // fetchRegistry = install/update steps 1–2: resolve config, fetch, verify.
-func fetchRegistry(cfg *config.Config, registryURLFlag, refFlag string) (*registry.Fetched, error) {
+// A genuinely missing domain surfaces unchanged as registry.ErrDomainAbsent so
+// callers can decide required vs. optional; every other failure is mapped to
+// registry_unreachable.
+func fetchRegistry(cfg *config.Config, d domain.Domain, registryURLFlag, refFlag string) (*registry.Fetched, error) {
 	if _, err := cfg.RequireRegistryURL(); err != nil && registryURLFlag == "" {
 		return nil, err
 	}
-	fetcher := newFetcher(cfg, registryURLFlag, refFlag)
+	fetcher := newFetcher(cfg, d, registryURLFlag, refFlag)
 	fc, err := registry.FetchAll(fetcher)
 	if err != nil {
+		if errors.Is(err, registry.ErrDomainAbsent) {
+			return nil, err
+		}
 		logx.Error("registry fetch failed: %v", err)
 		return nil, exit.New(exit.RegistryUnreachable, err.Error(),
 			"check registry url/ref/token in "+config.UserPath(flagConfig),
@@ -87,20 +95,45 @@ func fetchRegistry(cfg *config.Config, registryURLFlag, refFlag string) (*regist
 	return fc, nil
 }
 
+// requiredDomainError maps a missing required domain to registry_unreachable,
+// preserving the pre-domain-generic failure class (exit 4).
+func requiredDomainError(d domain.Domain, err error) error {
+	if errors.Is(err, registry.ErrDomainAbsent) {
+		return exit.New(exit.RegistryUnreachable,
+			fmt.Sprintf("registry is missing the required %s/ domain: %v", d.Base, err),
+			"check registry url/ref in "+config.UserPath(flagConfig))
+	}
+	return err
+}
+
 // populateCache = install/update step 3.
-func populateCache(fc *registry.Fetched) StepReport {
-	cached := registry.CacheManifestHash()
+func populateCache(fc *registry.Fetched, d domain.Domain) StepReport {
+	cached := registry.CacheManifestHash(d)
 	incoming := registry.SHA256Hex(fc.Content["manifest.json"])
-	dir := config.CacheDir()
+	dir := config.CacheDir(d)
 	if cached != "" && cached == incoming && fsutil.IsDir(dir) {
-		return StepReport{Step: "cache", Action: "up to date", Path: dir}
+		return StepReport{Step: cacheStep(d), Action: "up to date", Path: dir}
 	}
-	if err := registry.CacheSave(fc); err != nil {
-		return StepReport{Step: "cache", Action: "failed", Detail: err.Error()}
+	if err := registry.CacheSave(fc, d); err != nil {
+		return StepReport{Step: cacheStep(d), Action: "failed", Detail: err.Error()}
 	}
-	logx.Info("cache refreshed path=%s version=%s", dir, fc.Manifest.Version)
-	return StepReport{Step: "cache", Action: "refreshed", Path: dir,
+	logx.Info("cache refreshed domain=%s path=%s version=%s", d.Name, dir, fc.Manifest.Version)
+	return StepReport{Step: cacheStep(d), Action: "refreshed", Path: dir,
 		Detail: "manifest " + incoming[:12] + "…"}
+}
+
+// stepName qualifies a step with its domain for the domain-labeled rows of
+// multi-domain verbs; the neocortex rows stay byte-identical to before.
+func stepName(d domain.Domain, step string) string {
+	if d == domain.NeoCortex {
+		return step
+	}
+	return d.Name + " " + step
+}
+
+// cacheStep is the step label for the cache row (unchanged for neocortex).
+func cacheStep(d domain.Domain) string {
+	return stepName(d, "cache")
 }
 
 func newInstallCmd() *cobra.Command {
@@ -143,19 +176,19 @@ Example:
 			if err != nil {
 				return err
 			}
-			fc, err := fetchRegistry(cfg, registryURL, ref)
+			fc, err := fetchRegistry(cfg, domain.NeoCortex, registryURL, ref)
 			if err != nil {
-				return err
+				return requiredDomainError(domain.NeoCortex, err)
 			}
 			var steps []StepReport
 			steps = append(steps, StepReport{Step: "fetch", Action: "ok",
 				Detail: fmt.Sprintf("registry version %s (%d files)", fc.Manifest.Version, len(fc.Content)-1)})
 
-			steps = append(steps, populateCache(fc))
+			steps = append(steps, populateCache(fc, domain.NeoCortex))
 
 			ocDir := deploy.OpenCodeDir(cfg.OpenCode.Dir)
-			deployed := deploy.LoadDeployed()
-			decisions, err := deploy.InstallMode(fc, ocDir, deployed)
+			deployed := deploy.LoadDeployed(domain.NeoCortex)
+			decisions, err := deploy.InstallMode(fc, domain.NeoCortex, ocDir, deployed)
 			for _, d := range decisions {
 				steps = append(steps, StepReport{Step: "deploy " + d.Path, Action: d.Action,
 					Detail: d.Detail, Path: d.Target})

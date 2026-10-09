@@ -13,21 +13,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
 )
 
-// CacheLoad loads the verified snapshot from the global cache. The cache
-// holds manifest.json + stubs only (agents/commands deploy straight to the
-// opencode dir and are never cached).
-func CacheLoad() (*Fetched, error) {
-	dir := cacheDir()
+// CacheLoad loads the verified snapshot of a domain from its global cache. The
+// cache holds manifest.json + stubs only (agents/commands deploy straight to
+// the opencode dir and are never cached).
+func CacheLoad(d domain.Domain) (*Fetched, error) {
+	dir := cacheDir(d)
 	f := CacheFetcher{Dir: dir}
 	raw, err := f.Fetch("manifest.json")
 	if err != nil {
-		return nil, fmt.Errorf("cache empty — run: orbit neocortex update (or install)")
+		return nil, fmt.Errorf("cache empty — run: orbit %s update (or install)", d.Name)
 	}
 	manifest, err := ParseManifest(raw)
 	if err != nil {
@@ -37,18 +39,18 @@ func CacheLoad() (*Fetched, error) {
 	for _, e := range manifest.Files.Stubs {
 		data, err := f.Fetch(e.Path)
 		if err != nil {
-			return nil, fmt.Errorf("cache incomplete (%s) — run: orbit neocortex update", e.Path)
+			return nil, fmt.Errorf("cache incomplete (%s) — run: orbit %s update", e.Path, d.Name)
 		}
 		if got := SHA256Hex(data); got != e.SHA256 {
-			return nil, fmt.Errorf("cache integrity: sha256 mismatch for %s — run: orbit neocortex update", e.Path)
+			return nil, fmt.Errorf("cache integrity: sha256 mismatch for %s — run: orbit %s update", e.Path, d.Name)
 		}
 		fc.Content[e.Path] = data
 	}
 	return fc, nil
 }
 
-// CacheFetcher fetches from the global cache dir directly (paths relative
-// to neocortex/ == cache dir contents).
+// CacheFetcher fetches from a domain's cache dir directly (paths relative to
+// the domain root == cache dir contents).
 type CacheFetcher struct{ Dir string }
 
 func (c CacheFetcher) Fetch(relPath string) ([]byte, error) {
@@ -59,9 +61,9 @@ func (c CacheFetcher) Fetch(relPath string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(c.Dir, clean))
 }
 
-// CacheSave atomically writes stubs + manifest.json into the cache dir.
-func CacheSave(fc *Fetched) error {
-	dir := cacheDir()
+// CacheSave atomically writes stubs + manifest.json into the domain cache dir.
+func CacheSave(fc *Fetched, d domain.Domain) error {
+	dir := cacheDir(d)
 	if err := fsutil.EnsureDir(dir); err != nil {
 		return err
 	}
@@ -73,26 +75,31 @@ func CacheSave(fc *Fetched) error {
 	return fsutil.AtomicWrite(filepath.Join(dir, "manifest.json"), fc.Content["manifest.json"], 0o644)
 }
 
-// CacheManifestHash returns the sha256 of the cached manifest.json ("" if absent).
-func CacheManifestHash() string {
-	data, err := os.ReadFile(filepath.Join(cacheDir(), "manifest.json"))
+// CacheManifestHash returns the sha256 of the domain's cached manifest.json
+// ("" if absent).
+func CacheManifestHash(d domain.Domain) string {
+	data, err := os.ReadFile(filepath.Join(cacheDir(d), "manifest.json"))
 	if err != nil {
 		return ""
 	}
 	return SHA256Hex(data)
 }
 
-func cacheDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "orbit", "neocortex", "cache")
+// cacheDir is the canonical per-domain global cache. It is the single source
+// of truth shared with config.CacheDir and deploy's ledger locations.
+func cacheDir(d domain.Domain) string {
+	return d.CacheDir()
 }
 
-// RemoteFetcher fetches via the git binary (shallow clone), falling back
-// to a GitHub tarball download.
+// RemoteFetcher fetches one domain via the git binary (shallow clone),
+// falling back to a GitHub/GitLab tarball download. The repo is cloned once
+// per process and split into per-base subtrees, so two domains sharing a URL
+// share a single clone.
 type RemoteFetcher struct {
 	URL      string // https git URL
 	Ref      string
 	TokenEnv string // name of env var holding the token (never the token itself)
+	Domain   domain.Domain
 }
 
 // token returns the token value from the configured env var name.
@@ -103,36 +110,55 @@ func (r RemoteFetcher) token() string {
 	return os.Getenv(r.TokenEnv)
 }
 
+// remoteRepos caches the per-domain subtrees of a cloned repo, keyed by
+// URL|ref. A single clone serves every domain; each entry maps
+// base → (repo-relative path → bytes).
+var (
+	remoteMu    sync.Mutex
+	remoteRepos = map[string]map[string]map[string][]byte{}
+)
+
 func (r RemoteFetcher) Fetch(relPath string) ([]byte, error) {
-	// Fetch the whole tree once per process; lazy cache.
-	if cachedErr != nil {
-		return nil, cachedErr
-	}
-	if fetchedTree == nil {
-		fc, err := r.fetchAll()
-		if err != nil {
-			cachedErr = err
-			return nil, err
-		}
-		fetchedTree = fc
-	}
 	clean := filepath.Clean(relPath)
 	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
-		return nil, fmt.Errorf("refusing path outside neocortex/: %s", relPath)
+		return nil, fmt.Errorf("refusing path outside %s/: %s", r.Domain.Base, relPath)
 	}
-	data, ok := fetchedTree[clean]
+	repo, err := r.repo()
+	if err != nil {
+		return nil, err
+	}
+	baseTree, ok := repo[r.Domain.Base]
+	if !ok {
+		return nil, fmt.Errorf("%w: no %s/ folder in registry", ErrDomainAbsent, r.Domain.Base)
+	}
+	data, ok := baseTree[clean]
 	if !ok {
 		return nil, fmt.Errorf("file not in registry: %s", relPath)
 	}
 	return data, nil
 }
 
-var (
-	fetchedTree map[string][]byte
-	cachedErr   error
-)
+// repo returns the clone-once, per-base tree for this URL|ref.
+func (r RemoteFetcher) repo() (map[string]map[string][]byte, error) {
+	key := r.URL + "\x00" + r.Ref
+	remoteMu.Lock()
+	if tree, ok := remoteRepos[key]; ok {
+		remoteMu.Unlock()
+		return tree, nil
+	}
+	remoteMu.Unlock()
 
-func (r RemoteFetcher) fetchAll() (map[string][]byte, error) {
+	tree, err := r.fetchAll()
+	if err != nil {
+		return nil, err
+	}
+	remoteMu.Lock()
+	remoteRepos[key] = tree
+	remoteMu.Unlock()
+	return tree, nil
+}
+
+func (r RemoteFetcher) fetchAll() (map[string]map[string][]byte, error) {
 	if _, err := exec.LookPath("git"); err == nil {
 		if tree, err := r.fetchGit(); err == nil {
 			return tree, nil
@@ -143,7 +169,29 @@ func (r RemoteFetcher) fetchAll() (map[string][]byte, error) {
 	return r.fetchTarball()
 }
 
-func (r RemoteFetcher) fetchGit() (map[string][]byte, error) {
+// splitPath normalizes a repo-relative path into its components.
+func splitPath(rel string) []string {
+	return strings.Split(strings.TrimPrefix(filepath.ToSlash(rel), "./"), "/")
+}
+
+// knownBasePath finds the first known domain base component and returns the
+// domain-relative path after it. Scanning rather than assuming a fixed offset
+// tolerates a tarball's arbitrary wrapper prefix (e.g. <repo>-<ref>/).
+func knownBasePath(parts []string) (base, inner string, ok bool) {
+	for i, p := range parts {
+		if p == "" || !domain.IsKnownBase(p) {
+			continue
+		}
+		inner = strings.Join(parts[i+1:], "/")
+		if inner == "" {
+			return "", "", false
+		}
+		return p, inner, true
+	}
+	return "", "", false
+}
+
+func (r RemoteFetcher) fetchGit() (map[string]map[string][]byte, error) {
 	tmp, err := os.MkdirTemp("", "orbit-registry-*")
 	if err != nil {
 		return nil, err
@@ -163,24 +211,36 @@ func (r RemoteFetcher) fetchGit() (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git clone %s (ref %s) failed: %s", r.URL, r.Ref, strings.TrimSpace(string(out)))
 	}
-	neoRoot := filepath.Join(repo, "neocortex")
-	tree := map[string][]byte{}
-	err = filepath.Walk(neoRoot, func(path string, fi os.FileInfo, err error) error {
-		if err != nil || fi.IsDir() {
+	tree := map[string]map[string][]byte{}
+	err = filepath.Walk(repo, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(neoRoot, path)
+		if fi.IsDir() {
+			if fi.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, _ := filepath.Rel(repo, path)
+		base, inner, ok := knownBasePath(splitPath(rel))
+		if !ok {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		tree[filepath.ToSlash(rel)] = data
+		if tree[base] == nil {
+			tree[base] = map[string][]byte{}
+		}
+		tree[base][inner] = data
 		return nil
 	})
 	return tree, err
 }
 
-func (r RemoteFetcher) fetchTarball() (map[string][]byte, error) {
+func (r RemoteFetcher) fetchTarball() (map[string]map[string][]byte, error) {
 	apiURL := strings.TrimSuffix(r.URL, ".git")
 	switch {
 	case strings.HasPrefix(apiURL, "https://github.com/"):
@@ -225,9 +285,9 @@ func (r RemoteFetcher) fetchTarball() (map[string][]byte, error) {
 	return extractTarGz(gz)
 }
 
-// extractTarGz extracts only the neocortex/ subtree of the tarball.
-func extractTarGz(r io.Reader) (map[string][]byte, error) {
-	tree := map[string][]byte{}
+// extractTarGz extracts every known-domain subtree of the tarball.
+func extractTarGz(r io.Reader) (map[string]map[string][]byte, error) {
+	tree := map[string]map[string][]byte{}
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
@@ -237,22 +297,24 @@ func extractTarGz(r io.Reader) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		name := filepath.ToSlash(hdr.Name)
-		// Tarballs from GitHub wrap in <repo>-<ref>/.
-		if i := strings.Index(name, "neocortex/"); i >= 0 && hdr.Typeflag == tar.TypeReg {
-			rel := name[i+len("neocortex/"):]
-			if rel == "" || strings.HasSuffix(rel, "/") {
-				continue
-			}
-			var buf bytes.Buffer
-			if _, err := io.Copy(&buf, tr); err != nil {
-				return nil, err
-			}
-			tree[rel] = buf.Bytes()
+		if hdr.Typeflag != tar.TypeReg {
+			continue
 		}
+		base, inner, ok := knownBasePath(splitPath(hdr.Name))
+		if !ok {
+			continue
+		}
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, tr); err != nil {
+			return nil, err
+		}
+		if tree[base] == nil {
+			tree[base] = map[string][]byte{}
+		}
+		tree[base][inner] = buf.Bytes()
 	}
 	if len(tree) == 0 {
-		return nil, fmt.Errorf("tarball contains no neocortex/ folder")
+		return nil, fmt.Errorf("tarball contains no registry domain folders")
 	}
 	return tree, nil
 }

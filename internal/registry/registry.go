@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,7 +14,15 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+
+	"github.com/RTwoStudio/orbit/internal/domain"
 )
+
+// ErrDomainAbsent reports that a registry does not carry a requested domain
+// folder (no <base>/manifest.json). It is the only registry-fetch outcome that
+// `orbit update` treats as an optional soft skip; everything else remains a
+// registry_unreachable failure.
+var ErrDomainAbsent = errors.New("registry domain absent")
 
 // FileEntry is one deployable asset in the manifest.
 type FileEntry struct {
@@ -67,7 +76,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 		if e.Path == "" {
 			return nil, fmt.Errorf("manifest.json: empty path entry")
 		}
-		// Path traversal guard: entries are relative to neocortex/.
+		// Path traversal guard: entries are relative to the domain folder.
 		if filepath.IsAbs(e.Path) || strings.Contains(e.Path, "..") {
 			return nil, fmt.Errorf("manifest.json: unsafe path %q", e.Path)
 		}
@@ -86,29 +95,32 @@ func SHA256Hex(b []byte) string {
 
 // Fetcher abstracts registry acquisition so tests use local fixtures.
 type Fetcher interface {
-	// Fetch returns the raw bytes of a file relative to the neocortex/
-	// folder. Paths that escape the folder must be refused.
+	// Fetch returns the raw bytes of a file relative to the configured
+	// domain's folder. Paths that escape the folder must be refused.
 	Fetch(relPath string) ([]byte, error)
 }
 
-// DirFetcher serves a registry from a local directory (tests + fallback).
+// DirFetcher serves one domain of a registry from a local directory
+// (tests + fallback).
 type DirFetcher struct {
-	// Root is the repo root; all fetches are scoped to Root/neocortex.
-	Root string
+	// Root is the repo root; all fetches are scoped to Root/<Domain.Base>.
+	Root   string
+	Domain domain.Domain
 }
 
 func (d DirFetcher) Fetch(relPath string) ([]byte, error) {
+	base := d.Domain.Base
 	clean := filepath.Clean(relPath)
 	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
-		return nil, fmt.Errorf("refusing path outside neocortex/: %s", relPath)
+		return nil, fmt.Errorf("refusing path outside %s/: %s", base, relPath)
 	}
-	full := filepath.Join(d.Root, "neocortex", clean)
+	domainRoot := filepath.Join(d.Root, base)
+	full := filepath.Join(domainRoot, clean)
 	// Double-check containment after joining.
-	neocortexRoot := filepath.Join(d.Root, "neocortex")
 	absFull, _ := filepath.Abs(full)
-	absRoot, _ := filepath.Abs(neocortexRoot)
+	absRoot, _ := filepath.Abs(domainRoot)
 	if !strings.HasPrefix(absFull, absRoot+string(os.PathSeparator)) {
-		return nil, fmt.Errorf("refusing path outside neocortex/: %s", relPath)
+		return nil, fmt.Errorf("refusing path outside %s/: %s", base, relPath)
 	}
 	return os.ReadFile(full)
 }
@@ -121,10 +133,17 @@ type Fetched struct {
 }
 
 // FetchAll fetches the manifest plus every file it lists, verifying each
-// file's sha256. Any mismatch is a registry-integrity failure.
+// file's sha256. Any mismatch is a registry-integrity failure. A manifest that
+// is genuinely missing (no domain folder) surfaces as ErrDomainAbsent.
 func FetchAll(f Fetcher) (*Fetched, error) {
 	raw, err := f.Fetch("manifest.json")
 	if err != nil {
+		if errors.Is(err, ErrDomainAbsent) {
+			return nil, err
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: no manifest.json", ErrDomainAbsent)
+		}
 		return nil, fmt.Errorf("cannot fetch manifest.json: %w", err)
 	}
 	manifest, err := ParseManifest(raw)

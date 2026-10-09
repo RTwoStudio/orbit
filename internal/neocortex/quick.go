@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RTwoStudio/orbit/internal/doc"
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
@@ -38,7 +39,7 @@ func NewQuick(title string, src IssueSource) (*NewQuickResult, error) {
 		return nil, err
 	}
 
-	cache, err := registry.CacheLoad()
+	cache, err := registry.CacheLoad(domain.NeoCortex)
 	if err != nil {
 		return nil, exit.New(exit.RegistryUnreachable,
 			"registry cache is empty or corrupted — run: orbit neocortex update", err.Error())
@@ -167,7 +168,7 @@ func PromoteQuick(n int) (string, error) {
 			fmt.Sprintf("%s already exists — issue %d is already in the default lane", ConceptPath(n), n))
 	}
 
-	cache, err := registry.CacheLoad()
+	cache, err := registry.CacheLoad(domain.NeoCortex)
 	if err != nil {
 		return "", exit.New(exit.RegistryUnreachable,
 			"registry cache is empty or corrupted — run: orbit neocortex update", err.Error())

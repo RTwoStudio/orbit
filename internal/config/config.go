@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"gopkg.in/yaml.v3"
 )
@@ -172,16 +173,11 @@ func expandPath(p string) string {
 	return p
 }
 
-// CacheDir returns the global cache dir (~/.config/orbit/neocortex/cache).
-func CacheDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "orbit", "neocortex", "cache")
-}
-
-// DeployedJSONPath returns the path of deployed.json.
-func DeployedJSONPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "orbit", "neocortex", "deployed.json")
+// CacheDir returns the domain's global cache
+// (~/.config/orbit/<domain>/cache). It shares a single source of truth with
+// registry.cacheDir and deploy's ledger paths.
+func CacheDir(d domain.Domain) string {
+	return d.CacheDir()
 }
 
 // RequireRegistryURL returns the registry URL or a config_error.

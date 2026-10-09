@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/RTwoStudio/orbit/internal/doc"
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/logx"
@@ -80,7 +81,7 @@ func NewTask(issue int, id, name string) (path string, warnings []string, err er
 		}
 	}
 
-	cache, err := registry.CacheLoad()
+	cache, err := registry.CacheLoad(domain.NeoCortex)
 	if err != nil {
 		return "", nil, exit.New(exit.RegistryUnreachable, "registry cache is empty or corrupted — run: orbit neocortex update")
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
 	"github.com/RTwoStudio/orbit/internal/fsutil"
 	"github.com/RTwoStudio/orbit/internal/registry"
@@ -25,28 +26,27 @@ type DeployedRecord struct {
 // Deployed is the deployed.json ledger: manifest-relative path → record.
 type Deployed map[string]DeployedRecord
 
-// DeployedPath is ~/.config/orbit/neocortex/deployed.json.
-func DeployedPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "orbit", "neocortex", "deployed.json")
+// DeployedPath is ~/.config/orbit/<domain>/deployed.json.
+func DeployedPath(d domain.Domain) string {
+	return d.DeployedPath()
 }
 
-// LoadDeployed reads deployed.json (empty map if absent).
-func LoadDeployed() Deployed {
+// LoadDeployed reads the domain's deployed.json (empty map if absent).
+func LoadDeployed(d domain.Domain) Deployed {
 	out := Deployed{}
-	if data, err := os.ReadFile(DeployedPath()); err == nil {
+	if data, err := os.ReadFile(DeployedPath(d)); err == nil {
 		json.Unmarshal(data, &out)
 	}
 	return out
 }
 
-// Save writes deployed.json atomically.
-func (d Deployed) Save() error {
-	data, err := json.MarshalIndent(d, "", "  ")
+// Save writes the domain's deployed.json atomically.
+func (dep Deployed) Save(d domain.Domain) error {
+	data, err := json.MarshalIndent(dep, "", "  ")
 	if err != nil {
 		return err
 	}
-	return fsutil.AtomicWrite(DeployedPath(), data, 0o644)
+	return fsutil.AtomicWrite(DeployedPath(d), data, 0o644)
 }
 
 // OpenCodeDir resolves the deployment dir (config may override).
@@ -83,11 +83,11 @@ type Decision struct {
 	NewSHA string `json:"-"`
 }
 
-// InstallMode deploys opencode assets with install semantics: missing →
-// write; identical → skip; differs → refuse (state_conflict), never
+// InstallMode deploys a domain's opencode assets with install semantics:
+// missing → write; identical → skip; differs → refuse (state_conflict), never
 // overwrite. Only agents/commands entries are deployed here. Deployed
 // files are recorded in the ledger so update's version gate has a baseline.
-func InstallMode(fc *registry.Fetched, opencodeDir string, deployed Deployed) ([]Decision, error) {
+func InstallMode(fc *registry.Fetched, d domain.Domain, opencodeDir string, deployed Deployed) ([]Decision, error) {
 	var out []Decision
 	refused := false
 	changed := false
@@ -124,14 +124,14 @@ func InstallMode(fc *registry.Fetched, opencodeDir string, deployed Deployed) ([
 		out = append(out, dec)
 	}
 	if changed && !refused {
-		if err := deployed.Save(); err != nil {
+		if err := deployed.Save(d); err != nil {
 			return nil, exit.Wrap(exit.IOError, err, "cannot update deployed.json")
 		}
 	}
 	if refused {
 		return out, exit.New(exit.StateConflict,
 			"one or more opencode assets already exist with different content",
-			"remove the refused files and re-run install, or run 'orbit neocortex update' in an initialized project")
+			"remove the refused files and re-run install, or run 'orbit "+d.Name+" update' in an initialized project")
 	}
 	return out, nil
 }
@@ -147,7 +147,7 @@ type PromptFunc func(msg string, def bool) bool
 // true → delete orphans and drop their ledger records, but ONLY when the
 // on-disk file still matches the sha256 the CLI recorded (never touch a file
 // the user edited, and never touch a file that was never in the ledger).
-func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, prompt PromptFunc, prune bool) ([]Decision, error) {
+func UpdateMode(fc *registry.Fetched, d domain.Domain, opencodeDir string, deployed Deployed, prompt PromptFunc, prune bool) ([]Decision, error) {
 	var out []Decision
 	entries := append(append([]registry.FileEntry{}, fc.Manifest.Files.OpenCode.Agents...), fc.Manifest.Files.OpenCode.Commands...)
 	seen := map[string]bool{}
@@ -182,7 +182,7 @@ func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, pro
 				dec.Action = "installed"
 			} else {
 				dec.Action = "declined"
-				dec.Detail = fmt.Sprintf("update later with: orbit neocortex update (%s → %s)", rec.Version, fc.Manifest.Version)
+				dec.Detail = fmt.Sprintf("update later with: orbit %s update (%s → %s)", d.Name, rec.Version, fc.Manifest.Version)
 			}
 		case rec.Version != fc.Manifest.Version && registry.SHA256Hex(existing) == e.SHA256:
 			// Content already matches the new version; just re-record.
@@ -257,7 +257,7 @@ func UpdateMode(fc *registry.Fetched, opencodeDir string, deployed Deployed, pro
 		out = append(out, dec)
 	}
 	if changed {
-		if err := deployed.Save(); err != nil {
+		if err := deployed.Save(d); err != nil {
 			return nil, exit.Wrap(exit.IOError, err, "cannot update deployed.json")
 		}
 	}
