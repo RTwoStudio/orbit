@@ -126,6 +126,7 @@ Run 'orbit neocortex --help' for the full verb tree.`,
 	p.BoolVar(&flagJSON, "json", false, "machine-readable JSON output on stdout (human text on stderr)")
 
 	root.AddCommand(newNeoCortexCmd())
+	root.AddCommand(newCyclesCmd())
 	root.AddCommand(newCompletionCmd())
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newSelfCmd())

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/RTwoStudio/orbit/internal/config"
+	"github.com/RTwoStudio/orbit/internal/cycles"
 	"github.com/RTwoStudio/orbit/internal/deploy"
 	"github.com/RTwoStudio/orbit/internal/domain"
 	"github.com/RTwoStudio/orbit/internal/exit"
@@ -218,6 +219,78 @@ Example:
 	return cmd
 }
 
+// newCyclesInstallCmd is `orbit cycles install` (alias `init`): first-contact
+// setup for the vault-rooted Cycles domain. Unlike neocortex's project gate,
+// it is vault-gated — it resolves the vault root, fetches + caches + deploys
+// the cycles domain, and bootstraps <vault>/Cycles/ idempotently. It lives in
+// this shared install.go alongside newInstallCmd (one file, two commands).
+func newCyclesInstallCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "install",
+		Aliases: []string{"init"},
+		Short:   "First-contact setup: fetch registry, deploy assets, bootstrap the vault",
+		Long: `Performs first-contact setup for the Cycles workflow.
+
+Vault-gated (not project-gated): it resolves the vault root (--vault >
+config vault.dir) and never touches a project's .neocortex/.
+
+Steps (each idempotent, independently reported):
+  1. Resolve the vault root (exit 3 when no vault is configured)
+  2. Fetch registry + verify manifest + per-file sha256 (exit 4 on mismatch;
+     a missing cycles/ domain is a hard failure here, not a soft skip)
+  3. Populate the global cache (~/.config/orbit/cycles/cache)
+  4. Deploy opencode agents/commands (existing files are NEVER overwritten)
+  5. Bootstrap <vault>/Cycles/: backlog/, cycles/, empty CURRENT, and
+     CYCLES.md (copy-if-missing only)
+
+Exit codes: 0 ok · 3 config_error · 4 registry_unreachable · 7 state_conflict
+            10 io_error
+
+Example:
+  orbit cycles install --vault ~/orbit-vault`,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(flagConfig)
+			if err != nil {
+				return err
+			}
+			vault, err := resolveVault(cfg)
+			if err != nil {
+				return err
+			}
+			fc, err := fetchRegistry(cfg, domain.Cycles, "", "")
+			if err != nil {
+				return requiredDomainError(domain.Cycles, err)
+			}
+			var steps []StepReport
+			steps = append(steps, StepReport{Step: stepName(domain.Cycles, "fetch"), Action: "ok",
+				Detail: fmt.Sprintf("registry version %s (%d files)", fc.Manifest.Version, len(fc.Content)-1)})
+
+			steps = append(steps, populateCache(fc, domain.Cycles))
+
+			ocDir := deploy.OpenCodeDir(cfg.OpenCode.Dir)
+			deployed := deploy.LoadDeployed(domain.Cycles)
+			decisions, err := deploy.InstallMode(fc, domain.Cycles, ocDir, deployed)
+			for _, d := range decisions {
+				steps = append(steps, StepReport{Step: stepName(domain.Cycles, "deploy "+d.Path), Action: d.Action,
+					Detail: d.Detail, Path: d.Target})
+			}
+			if err != nil {
+				printSummaryAs(cmd, "cycles install", "install", steps)
+				return err
+			}
+
+			steps = append(steps, bootstrapVault(fc, cycles.Open(vault))...)
+
+			printSummaryAs(cmd, "cycles install", "install", steps)
+			offerCompletion(cmd)
+			logx.Info("cycles install complete version=%s", fc.Manifest.Version)
+			return nil
+		},
+	}
+	return cmd
+}
+
 // offerCompletion quietly offers to install shell completion once, after a
 // successful project install. It never fails the install: absence of a shell,
 // a declined prompt, an opt-out env, or an already-installed file are all
@@ -296,6 +369,58 @@ func bootstrapProject(fc *registry.Fetched) []StepReport {
 	return steps
 }
 
+// bootstrapVault = cycles install step 5: create <vault>/Cycles/ with its
+// backlog/ and cycles/ subdirs, an empty CURRENT, and a copy of the fetched
+// CYCLES.md root asset. Every write is copy-if-missing, so re-running is a
+// no-op and a locally edited CYCLES.md is never overwritten. A missing root
+// asset is a warned step, not a failure.
+func bootstrapVault(fc *registry.Fetched, s *cycles.Store) []StepReport {
+	var steps []StepReport
+
+	created := !s.IsInitialized()
+	if err := fsutil.EnsureDir(s.CyclesDir()); err != nil {
+		return append(steps, StepReport{Step: "cycles vault", Action: "failed", Detail: err.Error()})
+	}
+	for _, d := range []string{s.BacklogDir(), s.LedgerDir()} {
+		if err := fsutil.EnsureDir(d); err != nil {
+			return append(steps, StepReport{Step: "cycles vault", Action: "failed", Detail: err.Error()})
+		}
+	}
+	if created {
+		steps = append(steps, StepReport{Step: "cycles vault", Action: "installed",
+			Detail: "Cycles/ (backlog/, cycles/)", Path: s.CyclesDir()})
+	} else {
+		steps = append(steps, StepReport{Step: "cycles vault", Action: "up to date", Path: s.CyclesDir()})
+	}
+
+	curPath := s.CurrentPath()
+	if fsutil.Exists(curPath) {
+		steps = append(steps, StepReport{Step: "cycles CURRENT", Action: "up to date", Path: curPath})
+	} else if err := fsutil.AtomicWrite(curPath, []byte(""), 0o644); err != nil {
+		steps = append(steps, StepReport{Step: "cycles CURRENT", Action: "failed", Detail: err.Error()})
+	} else {
+		steps = append(steps, StepReport{Step: "cycles CURRENT", Action: "installed", Path: curPath})
+	}
+
+	cyclesMD := filepath.Join(s.CyclesDir(), "CYCLES.md")
+	if fsutil.Exists(cyclesMD) {
+		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "up to date", Path: cyclesMD})
+		return steps
+	}
+	content, ok := fc.Content["CYCLES.md"]
+	if !ok || len(content) == 0 {
+		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "warned",
+			Detail: "registry has no CYCLES.md root asset"})
+		return steps
+	}
+	if err := fsutil.AtomicWrite(cyclesMD, content, 0o644); err != nil {
+		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "failed", Detail: err.Error()})
+		return steps
+	}
+	steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "installed", Path: cyclesMD})
+	return steps
+}
+
 func newNeoCortexUpdateCmd() *cobra.Command {
 	var (
 		registryURL string
@@ -337,12 +462,15 @@ func deployedVersionOf(d deploy.Deployed, registryVersion string) string {
 	return registryVersion
 }
 
-// printSummary renders the step table (human on stdout/TTY, JSON when --json).
-func printSummary(cmd *cobra.Command, verb string, steps []StepReport) {
+// printSummaryAs renders the step table (human on stdout/TTY, JSON when
+// --json). The JSON envelope's `command` key and the human "<verb> summary:"
+// header are parameterized so every domain reports under its own verb while
+// the neocortex callsite stays byte-identical (see printSummary).
+func printSummaryAs(cmd *cobra.Command, command, verb string, steps []StepReport) {
 	if flagJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		enc.Encode(map[string]any{"command": "neocortex " + verb, "steps": steps})
+		enc.Encode(map[string]any{"command": command, "steps": steps})
 		return
 	}
 	out := cmd.OutOrStdout()
@@ -354,4 +482,10 @@ func printSummary(cmd *cobra.Command, verb string, steps []StepReport) {
 		}
 		fmt.Fprintf(out, "  %-12s %-14s %s%s\n", s.Action, s.Step, s.Path, detail)
 	}
+}
+
+// printSummary renders the neocortex step table; kept so existing callsites are
+// unchanged and the neocortex human/JSON output stays byte-identical.
+func printSummary(cmd *cobra.Command, verb string, steps []StepReport) {
+	printSummaryAs(cmd, "neocortex "+verb, verb, steps)
 }
