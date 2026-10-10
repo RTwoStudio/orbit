@@ -138,7 +138,7 @@ fill_shape() {
   local p="$1" name tmp
   tmp="$(mktemp)"
   cp "$p" "$tmp"
-  for name in "Problem" "Solution Sketch" "Rabbit Holes" "No-gos"; do
+  for name in "Problem" "Solution Sketch"; do
     awk -v h="## $name" '{ print } $0 == h { print ""; print "Smoke-filled " h "." }' "$tmp" > "$tmp.2"
     mv "$tmp.2" "$tmp"
   done

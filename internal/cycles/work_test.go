@@ -29,6 +29,10 @@ status: Backlog
 appetite:
 cycle:
 project:
+provider:
+repo:
+issue:
+milestone:
 neocortex-issue:
 history: []
 created: {{DATE}}
@@ -46,14 +50,6 @@ registry-version: {{REGISTRY_VERSION}}
 ## Solution Sketch
 
 <!-- Agent: The smallest shape that solves the problem. -->
-
-## Rabbit Holes
-
-<!-- Agent: Known traps, unknowns, and temptations to avoid. -->
-
-## No-gos
-
-<!-- Agent: Explicitly out of scope for this work item. -->
 
 ## Notes
 
@@ -144,21 +140,26 @@ func codeOf(t *testing.T, err error) exit.Code {
 	return e.Code
 }
 
-// fillShapeSections inserts non-comment content under each shape heading so
-// the shape preflight passes.
-func fillShapeSections(t *testing.T, path string) {
+// fillSection inserts non-comment content under one shape heading.
+func fillSection(t *testing.T, path, name string) {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(data)
-	for _, name := range []string{"Problem", "Solution Sketch", "Rabbit Holes", "No-gos"} {
-		marker := "## " + name + "\n"
-		s = strings.Replace(s, marker, marker+"\nFilled "+name+".\n", 1)
-	}
+	marker := "## " + name + "\n"
+	s := strings.Replace(string(data), marker, marker+"\nFilled "+name+".\n", 1)
 	if err := fsutil.AtomicWrite(path, []byte(s), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// fillShapeSections inserts non-comment content under each shape heading so
+// the shape preflight passes.
+func fillShapeSections(t *testing.T, path string) {
+	t.Helper()
+	for _, name := range []string{"Problem", "Solution Sketch"} {
+		fillSection(t, path, name)
 	}
 }
 
@@ -312,6 +313,42 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 	if _, err := s.ShelveWork("W-0001"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("shelve delivered code = %v, want state_conflict", codeOf(t, err))
+	}
+}
+
+// TestShapeWorkTwoSectionShape is the T1 regression: `shape` requires exactly
+// ## Problem and ## Solution Sketch, so either left comment-only is refused.
+func TestShapeWorkTwoSectionShape(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewWork("Half shaped", "scope-a"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.BacklogDir(), "W-0001 - half-shaped.md")
+
+	// Problem filled, Solution Sketch still comment-only → preflight_failed.
+	fillSection(t, path, "Problem")
+	if _, err := s.ShapeWork("W-0001", "small"); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("shape with Solution Sketch empty code = %v, want preflight_failed", codeOf(t, err))
+	}
+
+	// Filling the missing half lets the shape through (Backlog → Pitched).
+	fillSection(t, path, "Solution Sketch")
+	shaped, err := s.ShapeWork("W-0001", "small")
+	if err != nil {
+		t.Fatalf("ShapeWork with both sections: %v", err)
+	}
+	if shaped.Status != "Pitched" {
+		t.Errorf("shaped status = %q, want Pitched", shaped.Status)
+	}
+
+	// Fresh item, Solution Sketch filled but Problem comment-only → refused.
+	if _, err := s.NewWork("Other half", "scope-a"); err != nil {
+		t.Fatal(err)
+	}
+	otherPath := filepath.Join(s.BacklogDir(), "W-0002 - other-half.md")
+	fillSection(t, otherPath, "Solution Sketch")
+	if _, err := s.ShapeWork("W-0002", "big"); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("shape with Problem empty code = %v, want preflight_failed", codeOf(t, err))
 	}
 }
 
@@ -469,14 +506,22 @@ func TestWorkItemJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Populate the forge links so the omitempty int fields are present.
+	item, err = s.SetWorkForge(item.ID, WorkForge{
+		Provider: "github", Repo: "RTwoStudio/orbit", Issue: 7, Milestone: 3,
+	})
+	if err != nil {
+		t.Fatalf("SetWorkForge: %v", err)
+	}
 	data, err := json.Marshal(item)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
 		`"id"`, `"title"`, `"scope"`, `"status"`, `"appetite"`, `"cycle"`,
-		`"project"`, `"neocortex_issue"`, `"path"`, `"created"`,
-		`"registry_version"`, `"history":[]`,
+		`"project"`, `"provider":"github"`, `"repo":"RTwoStudio/orbit"`,
+		`"issue":7`, `"milestone":3`, `"neocortex_issue"`, `"path"`,
+		`"created"`, `"registry_version"`, `"history":[]`,
 	} {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("marshalled WorkItem missing %s: %s", key, data)

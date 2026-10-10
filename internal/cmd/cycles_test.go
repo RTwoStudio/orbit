@@ -28,6 +28,10 @@ status: Backlog
 appetite:
 cycle:
 project:
+provider:
+repo:
+issue:
+milestone:
 neocortex-issue:
 history: []
 created: {{DATE}}
@@ -44,14 +48,6 @@ registry-version: {{REGISTRY_VERSION}}
 
 <!-- Agent: The smallest shape that solves the problem. -->
 
-## Rabbit Holes
-
-<!-- Agent: Known traps, unknowns, and temptations to avoid. -->
-
-## No-gos
-
-<!-- Agent: Explicitly out of scope for this work item. -->
-
 ## Notes
 
 <!-- Agent: Anything else. -->
@@ -65,6 +61,10 @@ goal: "{{CYCLE_GOAL}}"
 status: Open
 start: {{START_DATE}}
 end: {{END_DATE}}
+project:
+repo:
+provider:
+milestone: {}
 created: {{DATE}}
 registry-version: {{REGISTRY_VERSION}}
 ---
@@ -216,7 +216,7 @@ func fillCyclesShapeSections(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	s := string(data)
-	for _, name := range []string{"Problem", "Solution Sketch", "Rabbit Holes", "No-gos"} {
+	for _, name := range []string{"Problem", "Solution Sketch"} {
 		marker := "## " + name + "\n"
 		s = strings.Replace(s, marker, marker+"\nFilled "+name+".\n", 1)
 	}

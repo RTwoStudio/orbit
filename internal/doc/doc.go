@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/RTwoStudio/orbit/internal/fsutil"
@@ -161,6 +163,74 @@ func (d *Doc) AppendToList(key, value string) {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: value, Tag: "!!str"})
 	d.Head.Content = append(d.Head.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: key}, seq)
+}
+
+// GetStringMap returns a mapping key's scalar child values. It returns nil
+// when the key is absent or the node is not a mapping (a read view never
+// errors on a missing/malformed map).
+func (d *Doc) GetStringMap(key string) map[string]string {
+	for i := 0; i+1 < len(d.Head.Content); i += 2 {
+		if d.Head.Content[i].Value == key {
+			v := d.Head.Content[i+1]
+			if v.Kind != yaml.MappingNode {
+				return nil
+			}
+			out := make(map[string]string, len(v.Content)/2)
+			for j := 0; j+1 < len(v.Content); j += 2 {
+				out[v.Content[j].Value] = v.Content[j+1].Value
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+// SetStringMap sets (or appends) a mapping key whose scalar child values are
+// emitted in sorted key order, so the YAML is deterministic. A nil or empty
+// map renders as an empty mapping `{}`.
+func (d *Doc) SetStringMap(key string, m map[string]string) {
+	node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	if len(m) == 0 {
+		node.Style = yaml.FlowStyle // render as `{}` rather than an empty block
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: m[k], Tag: "!!str"})
+	}
+	for i := 0; i+1 < len(d.Head.Content); i += 2 {
+		if d.Head.Content[i].Value == key {
+			d.Head.Content[i+1] = node
+			return
+		}
+	}
+	d.Head.Content = append(d.Head.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key}, node)
+}
+
+// SetInt sets (or appends) a scalar integer frontmatter key, tagged `!!int`
+// so it emits as a bare integer rather than a quoted string (`Set` forces
+// `!!str`).
+func (d *Doc) SetInt(key string, v int) {
+	s := strconv.Itoa(v)
+	for i := 0; i+1 < len(d.Head.Content); i += 2 {
+		if d.Head.Content[i].Value == key {
+			n := d.Head.Content[i+1]
+			n.Kind = yaml.ScalarNode
+			n.Tag = "!!int"
+			n.Value = s
+			n.Style = 0
+			return
+		}
+	}
+	d.Head.Content = append(d.Head.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: s, Tag: "!!int"})
 }
 
 // Section extracts the text of a "## <name>" section (excluding the heading

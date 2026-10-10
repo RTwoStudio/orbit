@@ -101,8 +101,8 @@ func newCyclesWorkShapeCmd() *cobra.Command {
 		Long: `Stamps status Pitched and the chosen appetite.
 
 Preflight: the item must be Backlog (exit 7 otherwise); appetite must be
-big or small (exit 6); Problem, Solution Sketch, Rabbit Holes, and No-gos
-must all be filled (exit 6).
+big or small (exit 6); Problem and Solution Sketch must both be filled
+(exit 6).
 
 Exit codes: 0 ok · 2 usage · 5 not_found · 6 preflight_failed
             7 state_conflict · 10 io_error

@@ -33,16 +33,20 @@ const bareDateLayout = "2006-01-02"
 // rendering. The json tags are part of that contract. Bets is the regenerated
 // read view over the work committed to the cycle.
 type Cycle struct {
-	ID              string     `json:"id"`
-	Goal            string     `json:"goal"`
-	Release         string     `json:"release"`
-	Status          string     `json:"status"`
-	Start           string     `json:"start"`
-	End             string     `json:"end"`
-	Created         string     `json:"created"`
-	RegistryVersion string     `json:"registry_version"`
-	Path            string     `json:"path"`
-	Bets            []WorkItem `json:"bets"`
+	ID              string         `json:"id"`
+	Goal            string         `json:"goal"`
+	Release         string         `json:"release"`
+	Status          string         `json:"status"`
+	Start           string         `json:"start"`
+	End             string         `json:"end"`
+	Project         string         `json:"project"`
+	Repo            string         `json:"repo"`
+	Provider        string         `json:"provider"`
+	Milestones      map[string]int `json:"milestone"`
+	Created         string         `json:"created"`
+	RegistryVersion string         `json:"registry_version"`
+	Path            string         `json:"path"`
+	Bets            []WorkItem     `json:"bets"`
 }
 
 // NewCycle creates the next cycle, renders its note from the cached
@@ -344,10 +348,25 @@ func (s *Store) cycleFromDoc(d *doc.Doc, id string) *Cycle {
 		Status:          canonicalCycleStatus(d.Get("status")),
 		Start:           d.Get("start"),
 		End:             d.Get("end"),
+		Project:         d.Get("project"),
+		Repo:            d.Get("repo"),
+		Provider:        d.Get("provider"),
+		Milestones:      stringMapToIntMap(d.GetStringMap("milestone")),
 		Created:         d.Get("created"),
 		RegistryVersion: d.Get("registry-version"),
 		Path:            d.Path,
 	}
+}
+
+// stringMapToIntMap converts a mapping key's string values to ints, tolerating
+// malformed values as 0. A nil input yields an empty (non-nil) map so the read
+// shape always renders as a JSON object rather than null.
+func stringMapToIntMap(m map[string]string) map[string]int {
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		out[k] = atoiOrZero(v)
+	}
+	return out
 }
 
 // canonicalCycleStatus normalizes a raw status for display; unknown values

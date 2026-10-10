@@ -24,6 +24,10 @@ goal: "{{CYCLE_GOAL}}"
 status: Open
 start: {{START_DATE}}
 end: {{END_DATE}}
+project:
+repo:
+provider:
+milestone: {}
 created: {{DATE}}
 registry-version: {{REGISTRY_VERSION}}
 ---
@@ -498,12 +502,21 @@ func TestCycleJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cy, err = s.SetCycleForge(cy.ID, CycleForge{
+		Project:    "/home/x/proj",
+		Milestones: map[string]int{"RTwoStudio/orbit": 4},
+	})
+	if err != nil {
+		t.Fatalf("SetCycleForge: %v", err)
+	}
 	data, err := json.Marshal(cy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
 		`"id"`, `"goal"`, `"release"`, `"status"`, `"start"`, `"end"`,
+		`"project":"/home/x/proj"`, `"repo"`, `"provider"`,
+		`"milestone":{"RTwoStudio/orbit":4}`,
 		`"created"`, `"registry_version"`, `"path"`, `"bets":[]`,
 	} {
 		if !strings.Contains(string(data), key) {

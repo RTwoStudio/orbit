@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ type WorkItem struct {
 	Appetite        string   `json:"appetite"`
 	Cycle           string   `json:"cycle"`
 	Project         string   `json:"project"`
+	Provider        string   `json:"provider"`
+	Repo            string   `json:"repo"`
+	Issue           int      `json:"issue,omitempty"`
+	Milestone       int      `json:"milestone,omitempty"`
 	NeocortexIssue  string   `json:"neocortex_issue"`
 	Path            string   `json:"path"`
 	Created         string   `json:"created"`
@@ -88,7 +93,7 @@ func (s *Store) NewWork(title, scope string) (*WorkItem, error) {
 }
 
 // ShapeWork moves a Backlog item to Pitched: it validates the appetite and
-// requires the four shape sections (comments ignored) to be non-empty, then
+// requires the two shape sections (comments ignored) to be non-empty, then
 // stamps status + appetite and appends one history entry in place.
 func (s *Store) ShapeWork(id, appetite string) (*WorkItem, error) {
 	d, err := s.findAndParse(id)
@@ -106,11 +111,11 @@ func (s *Store) ShapeWork(id, appetite string) (*WorkItem, error) {
 		return nil, exit.New(exit.PreflightFailed,
 			fmt.Sprintf("invalid appetite %q — valid: big, small", appetite))
 	}
-	for _, name := range []string{"Problem", "Solution Sketch", "Rabbit Holes", "No-gos"} {
+	for _, name := range []string{"Problem", "Solution Sketch"} {
 		if doc.StripHTMLComments(doc.Section(d.Body, name)) == "" {
 			return nil, exit.New(exit.PreflightFailed,
 				fmt.Sprintf("%s: ## %s is empty — fill the shape sections before shaping", d.Path, name),
-				"fill Problem, Solution Sketch, Rabbit Holes and No-gos, then retry")
+				"fill Problem and Solution Sketch, then retry")
 		}
 	}
 	if err := CheckWorkTransition(from, WorkPitched); err != nil {
@@ -341,12 +346,26 @@ func workItemFromDoc(d *doc.Doc) *WorkItem {
 		Appetite:        d.Get("appetite"),
 		Cycle:           d.Get("cycle"),
 		Project:         d.Get("project"),
+		Provider:        d.Get("provider"),
+		Repo:            d.Get("repo"),
+		Issue:           atoiOrZero(d.Get("issue")),
+		Milestone:       atoiOrZero(d.Get("milestone")),
 		NeocortexIssue:  d.Get("neocortex-issue"),
 		Path:            d.Path,
 		Created:         d.Get("created"),
 		RegistryVersion: d.Get("registry-version"),
 		History:         history,
 	}
+}
+
+// atoiOrZero parses a tolerant integer frontmatter value: an empty or
+// malformed value yields 0 so a read view never errors.
+func atoiOrZero(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // canonicalStatus normalizes a raw status for display; unknown values pass

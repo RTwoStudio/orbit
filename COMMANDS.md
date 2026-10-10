@@ -484,8 +484,7 @@ Exit codes: 0 · 2 · 4 · 6 · 10 · 11.
 | `--appetite` | string | `big` \| `small` (required) |
 
 Preflight: item is `Backlog` (else exit 7); appetite valid (exit 6); the
-`## Problem`, `## Solution Sketch`, `## Rabbit Holes`, and `## No-gos` sections
-are all non-empty (exit 6).
+`## Problem` and `## Solution Sketch` sections are both non-empty (exit 6).
 Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
 
 ### `work bet|shelve|unshelve|deliver <W-####>`

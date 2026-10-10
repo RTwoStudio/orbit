@@ -111,6 +111,117 @@ func TestGetSetAppend(t *testing.T) {
 	}
 }
 
+func TestGetStringMap(t *testing.T) {
+	src := "---\nMilestone:\n  b/repo: \"2\"\n  a/repo: \"1\"\nScalar: x\nSeq:\n  - a\n---\nbody\n"
+	d, err := ParseDocBytes("mem.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"a/repo": "1", "b/repo": "2"}
+	if got := d.GetStringMap("Milestone"); !reflect.DeepEqual(got, want) {
+		t.Errorf("GetStringMap Milestone = %v, want %v", got, want)
+	}
+	if got := d.GetStringMap("Scalar"); got != nil {
+		t.Errorf("GetStringMap on scalar = %v, want nil", got)
+	}
+	if got := d.GetStringMap("Seq"); got != nil {
+		t.Errorf("GetStringMap on sequence = %v, want nil", got)
+	}
+	if got := d.GetStringMap("Absent"); got != nil {
+		t.Errorf("GetStringMap absent = %v, want nil", got)
+	}
+}
+
+func TestSetStringMap(t *testing.T) {
+	src := "---\nKeep: yes\nmilestone: {}\n---\nbody\n"
+	d, err := ParseDocBytes("mem.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetStringMap("milestone", map[string]string{"zeta/repo": "9", "alpha/repo": "3"})
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	iAlpha, iZeta := strings.Index(s, "alpha/repo"), strings.Index(s, "zeta/repo")
+	if iAlpha < 0 || iZeta < 0 || iAlpha > iZeta {
+		t.Errorf("SetStringMap keys not sorted:\n%s", s)
+	}
+	d2, err := ParseDocBytes("mem.md", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"alpha/repo": "3", "zeta/repo": "9"}
+	if got := d2.GetStringMap("milestone"); !reflect.DeepEqual(got, want) {
+		t.Errorf("round-trip map = %v, want %v", got, want)
+	}
+	if string(d2.Body) != "body\n" {
+		t.Errorf("body = %q, want %q", string(d2.Body), "body\n")
+	}
+	if d2.Get("Keep") != "yes" {
+		t.Errorf("SetStringMap clobbered a sibling key: %q", d2.Get("Keep"))
+	}
+
+	// A nil map renders as an empty mapping, not an empty block.
+	d2.SetStringMap("empty", nil)
+	out2, err := d2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out2), "empty: {}") {
+		t.Errorf("nil map should render as `empty: {}`:\n%s", out2)
+	}
+
+	// A missing key is appended and reads back.
+	d2.SetStringMap("fresh", map[string]string{"k": "v"})
+	out3, err := d2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d3, err := ParseDocBytes("mem.md", out3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d3.GetStringMap("fresh"); !reflect.DeepEqual(got, map[string]string{"k": "v"}) {
+		t.Errorf("appended map = %v, want {k:v}", got)
+	}
+}
+
+func TestSetInt(t *testing.T) {
+	src := "---\nissue:\n---\nbody\n"
+	d, err := ParseDocBytes("mem.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetInt("issue", 42)
+	d.SetInt("added", 7)
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "issue: 42\n") {
+		t.Errorf("SetInt issue not a bare int:\n%s", s)
+	}
+	if strings.Contains(s, `"42"`) {
+		t.Errorf("SetInt emitted a quoted string:\n%s", s)
+	}
+	if !strings.Contains(s, "added: 7\n") {
+		t.Errorf("SetInt appended key not a bare int:\n%s", s)
+	}
+	d2, err := ParseDocBytes("mem.md", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d2.Get("issue") != "42" || d2.Get("added") != "7" {
+		t.Errorf("round-trip ints = %q/%q, want 42/7", d2.Get("issue"), d2.Get("added"))
+	}
+	if string(d2.Body) != "body\n" {
+		t.Errorf("body = %q, want %q", string(d2.Body), "body\n")
+	}
+}
+
 func TestSaveRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.md")
