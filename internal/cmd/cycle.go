@@ -14,7 +14,7 @@ import (
 func newCyclesCycleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cycle",
-		Short: "Open and close cycles (new/close/list/show)",
+		Short: "Open and close cycles (new/close/sync/list/show)",
 		Long: `Manage time-boxed cycles. At most one cycle may be open at a time; the
 CURRENT pointer names it, and ` + "`cycle close`" + ` shelves every non-delivered bet.
 
@@ -22,6 +22,7 @@ Subcommands:
   new "<goal>" --release <semver> [--start <date>] [--end <date>]
                               Open the next cycle (sets CURRENT)
   close                       Close the open cycle and clear CURRENT
+  sync                        Sync the open cycle's milestones (network)
   list                        Table of cycles (--json)
   show <C-####>               Print the cycle note (--json)
 
@@ -41,6 +42,7 @@ Exit codes:
 	cmd.AddCommand(
 		newCyclesCycleNewCmd(),
 		newCyclesCycleCloseCmd(),
+		newCyclesCycleSyncCmd(),
 		newCyclesCycleListCmd(),
 		newCyclesCycleShowCmd(),
 	)

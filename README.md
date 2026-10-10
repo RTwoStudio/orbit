@@ -19,8 +19,8 @@ orbit neocortex addenda      # new | list | show | approve | apply
 orbit neocortex task         # new | start | revise | close | rework | list | show | next
 orbit neocortex close        # verify a default-lane issue is complete (read-only)
 orbit cycles install         # first contact: fetch → cache → deploy → bootstrap the vault
-orbit cycles work            # new | shape | bet | shelve | unshelve | deliver | list | show
-orbit cycles cycle           # new | close | list | show
+orbit cycles work            # new | shape | bet | shelve | unshelve | deliver | sync | list | show
+orbit cycles cycle           # new | sync | close | list | show
 orbit cycles status          # board: current cycle + backlog ladder
 orbit completion             # install bash/zsh/fish/powershell completion
 ```
@@ -44,7 +44,10 @@ Orbit ships two domains, one per level of abstraction:
 - **Cycles** — the **planning and commitment** layer. It answers *what should
   we work on, why, and when are we committing to it?* Work items (`W-####`)
   are captured, shaped, and bet into time-boxed cycles (`C-####`) whose
-  Markdown lives in a global vault (`<vault.dir>/Cycles/`).
+  Markdown lives in a global vault (`<vault.dir>/Cycles/`). It is offline by
+  default: only the two explicit sync verbs — `work sync` and `cycle sync` —
+  touch the network, mirroring bets and cycles to GitHub/GitLab issues and
+  milestones via the `gh`/`glab` CLIs.
 - **NeoCortex** — the **engineering execution** layer. It answers *how do we
   actually build it?* Issues, plans, and tasks live in a project's
   `.neocortex/`.
@@ -319,7 +322,9 @@ one-line load step, and is safe to re-run. Override the target directory with
   prints the report. Quick runs close through `quick close <N>`.
 - **Cycles domain.** `orbit cycles` adds the vault-rooted planning layer
   (`work`/`cycle`/`status`) beside neocortex; `orbit cycles install` (alias
-  `init`) bootstraps `<vault.dir>/Cycles/` idempotently.
+  `init`) bootstraps `<vault.dir>/Cycles/` idempotently. It stays offline
+  except for the opt-in forge sync verbs `work sync` / `cycle sync`
+  (`gh`/`glab`), which mirror bets/cycles to GitHub/GitLab issues/milestones.
 - Update touches only global state (cache, opencode assets,
   `deployed.json`) — never the project or the vault.
 - Only install/update ever prompt. Domain commands are deterministic and

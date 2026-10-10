@@ -11,6 +11,9 @@
 #   install → work new → shape → cycle new → bet → deliver
 #           → work new → shape → bet → cycle close (auto-shelve)
 #           → list/show/status (human + --json) → update (both domains)
+#           → forge sync (stubbed gh/glab: cycle sync → work sync, github
+#             + gitlab, idempotency, skip/override, missing-CLI/unauthenticated
+#             degradation)
 # plus the exit-code contract and a no-neocortex-regression check.
 #
 # Usage:
@@ -149,6 +152,34 @@ fill_shape() {
 backlog_path() { printf '%s\n' "$VAULT"/Cycles/backlog/"$1"*.md; }
 
 section() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
+
+# --- Forge-section helpers (verification tooling only) ----------------------
+# assert_grep <label> <ERE> <file>: like assert_has but for a regular expression
+# (used to match the milestone map's key/value regardless of YAML quoting).
+assert_grep() { grep -qE -- "$2" "$3" 2>/dev/null && ok "$1" || bad "$1: pattern '$2' not in $3"; }
+
+# json_num <key> <json>: first `"key": <int>` value (writeJSON indents one
+# field per line; the string-only json_field above cannot read numbers).
+json_num() { printf '%s' "$2" | sed -n "s/.*\"$1\": \([0-9][0-9]*\).*/\1/p" | head -n1; }
+
+# log_count <fixed-string> <file>: number of matching lines in a stub's argv log
+# (`|| true` keeps `set -e` happy when the count is zero).
+log_count() { grep -cF -- "$1" "$2" 2>/dev/null || true; }
+
+# run_no_forge <args...>: like run, but the CLI is handed a PATH holding git and
+# no forge CLI, so a real gh/glab on the developer's machine can never mask the
+# missing-CLI path. The PATH change is scoped to the orbit invocation only.
+run_no_forge() {
+  printf '\n$ orbit %s  [PATH without gh/glab]\n' "$*"
+  local errf="$TMP/.stderr"
+  set +e
+  LAST_OUT="$(PATH="$FORGE_LESS_BIN" "$ORBIT" "$@" 2>"$errf")"
+  LAST_RC=$?
+  set -e
+  if [ -n "$LAST_OUT" ]; then printf '%s\n' "$LAST_OUT"; fi
+  if [ -s "$errf" ]; then sed 's/^/  ! /' "$errf"; fi
+  printf '  → exit %s\n' "$LAST_RC"
+}
 
 echo "smoke: CLI      = $ORBIT"
 echo "smoke: registry = $REGISTRY_SRC (snapshotted)"
@@ -310,6 +341,309 @@ assert_out_has "neocortex install json label unchanged" '"command": "neocortex i
 # In a directory with no .neocortex/, `neocortex which` is still no_active_run.
 run neocortex which
 assert_rc "neocortex which (no project) → 9" 9
+
+# ---------------------------------------------------------------------------
+section "forge sync: stub gh/glab, full work/cycle sync flow"
+
+# --- Stub the forge CLIs ----------------------------------------------------
+# STUB_BIN sits FIRST on PATH so the stubs shadow any real gh/glab; earlier
+# sections never invoked a forge CLI and are unaffected. FORGE_LESS_BIN holds
+# git alone, so the missing-CLI path is reachable even on a machine that has a
+# real gh/glab installed.
+STUB_BIN="$TMP/stub-bin"
+FORGE_LESS_BIN="$TMP/forge-less-bin"
+mkdir -p "$STUB_BIN" "$FORGE_LESS_BIN"
+ln -sf "$(command -v git)" "$FORGE_LESS_BIN/git"
+export PATH="$STUB_BIN:$PATH"
+
+cat > "$STUB_BIN/gh" <<'GH_STUB'
+#!/usr/bin/env bash
+# Stub gh for the cycles forge smoke: logs argv, allocates issue/milestone
+# numbers from counter files, and prints the URL/JSON the github wrapper parses.
+bin="$(cd "$(dirname "$0")" && pwd)"
+log="$bin/gh.log"
+printf '%s\n' "$*" >> "$log"
+next() { # next <counter-file> -> prints the incremented counter
+  local f="$bin/$1" n
+  n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 ))
+  printf '%s\n' "$n" > "$f"
+  printf '%s' "$n"
+}
+case "$1 $2" in
+  "auth status")
+    if [ "${GH_STUB_UNAUTH:-0}" = "1" ]; then
+      echo "gh: not logged into any GitHub hosts" >&2
+      exit 1
+    fi
+    echo "Logged in to github.com as smoke"
+    exit 0
+    ;;
+  "issue create")
+    n="$(next gh.issue-counter)"
+    url="https://github.com/RTwoStudio/orbit/issues/$n"
+    printf 'created %s\n' "$url" >> "$log"
+    echo "$url"
+    exit 0
+    ;;
+  "issue edit")
+    exit 0
+    ;;
+  "api "*)
+    n="$(next gh.ms-counter)"
+    title=""
+    for a in "$@"; do case "$a" in title=*) title="${a#title=}" ;; esac; done
+    printf '{"number":%s,"title":"%s","html_url":"https://github.com/RTwoStudio/orbit/milestone/%s"}\n' "$n" "$title" "$n"
+    exit 0
+    ;;
+esac
+echo "gh stub: unexpected args: $*" >&2
+exit 1
+GH_STUB
+chmod +x "$STUB_BIN/gh"
+
+cat > "$STUB_BIN/glab" <<'GLAB_STUB'
+#!/usr/bin/env bash
+# Stub glab for the cycles forge smoke: logs argv, allocates issue/milestone
+# iids, and prints the URL/JSON the gitlab wrapper parses.
+bin="$(cd "$(dirname "$0")" && pwd)"
+log="$bin/glab.log"
+printf '%s\n' "$*" >> "$log"
+next() {
+  local f="$bin/$1" n
+  n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 ))
+  printf '%s\n' "$n" > "$f"
+  printf '%s' "$n"
+}
+case "$1 $2" in
+  "auth status")
+    if [ "${GLAB_STUB_UNAUTH:-0}" = "1" ]; then
+      echo "glab: not authenticated" >&2
+      exit 1
+    fi
+    echo "Logged in to gitlab.com as smoke"
+    exit 0
+    ;;
+  "issue create")
+    n="$(next glab.issue-counter)"
+    url="https://gitlab.com/rtwo/orbit/-/issues/$n"
+    printf 'created %s\n' "$url" >> "$log"
+    echo "$url"
+    exit 0
+    ;;
+  "issue update")
+    exit 0
+    ;;
+  "api "*)
+    n="$(next glab.ms-counter)"
+    title=""
+    for a in "$@"; do case "$a" in title=*) title="${a#title=}" ;; esac; done
+    printf '{"iid":%s,"title":"%s","web_url":"https://gitlab.com/rtwo/orbit/-/milestones/%s"}\n' "$n" "$title" "$n"
+    exit 0
+    ;;
+esac
+echo "glab stub: unexpected args: $*" >&2
+exit 1
+GLAB_STUB
+chmod +x "$STUB_BIN/glab"
+
+# --- Offline temp git projects (forge.Resolve reads git config only) --------
+mkdir -p "$TMP/proj-gh" "$TMP/proj-gl"
+( cd "$TMP/proj-gh" && git -c init.defaultBranch=main init -q \
+  && git remote add origin https://github.com/RTwoStudio/orbit.git )
+( cd "$TMP/proj-gl" && git -c init.defaultBranch=main init -q \
+  && git remote add origin https://gitlab.com/rtwo/orbit.git )
+assert_dir "temp proj-gh created" "$TMP/proj-gh/.git"
+assert_dir "temp proj-gl created" "$TMP/proj-gl/.git"
+
+# --- github: cycle sync happy path + idempotency + work sync ---------------
+run cycles cycle new "Forge github sync" --release 0.4.0 --json
+assert_rc "cycle new (forge gh)" 0
+c2="$(json_field id "$LAST_OUT")"
+g2="$(json_field goal "$LAST_OUT")"
+c2_note="$VAULT/Cycles/cycles/$c2/$c2.md"
+
+run cycles work new "Publish the beta" --scope forge-app --json
+assert_rc "work new (forge gh)" 0
+w3="$(json_field id "$LAST_OUT")"
+w3_backlog="$(json_field path "$LAST_OUT")"
+fill_shape "$w3_backlog"
+run cycles work shape "$w3" --appetite small --json
+assert_rc "work shape (forge gh)" 0
+run cycles work bet "$w3" --json
+assert_rc "work bet (forge gh)" 0
+w3_path="$(json_field path "$LAST_OUT")"
+assert_file "forge gh bet sits in the cycle" "$w3_path"
+sed -i "s|^project:.*|project: $TMP/proj-gh|" "$w3_path"
+assert_has "forge gh bet seeded with project" "project: $TMP/proj-gh" "$w3_path"
+
+# Degradation (missing CLI): no milestone is recorded yet, so cycle sync must
+# probe gh and fail with the PATH hint (exit 1).
+run_no_forge cycles cycle sync
+assert_rc "cycle sync without gh → 1" 1
+assert_has "cycle sync missing-CLI hint" "not found on PATH" "$TMP/.stderr"
+
+# Happy path: --json creates exactly one github milestone.
+run cycles cycle sync --json
+assert_rc "cycle sync --json (github)" 0
+assert_out_has "cycle sync json provider github" '"provider": "github"'
+assert_out_has "cycle sync json repo" '"repo": "RTwoStudio/orbit"'
+assert_out_has "cycle sync json action created" '"action": "created"'
+gh_ms="$(json_num number "$LAST_OUT")"
+[ -n "$gh_ms" ] && [ "$gh_ms" -gt 0 ] \
+  && ok "cycle sync recorded milestone #$gh_ms" \
+  || bad "cycle sync milestone number not found in $LAST_OUT"
+assert_has "cycle records project scalar" "project: $TMP/proj-gh" "$c2_note"
+assert_has "cycle records repo scalar" "repo: RTwoStudio/orbit" "$c2_note"
+assert_has "cycle records provider scalar" "provider: github" "$c2_note"
+assert_grep "cycle records milestone map entry" "RTwoStudio/orbit: \"?$gh_ms\"?" "$c2_note"
+assert_grep "gh milestone gets an RFC3339 due_on" "due_on=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z" "$STUB_BIN/gh.log"
+
+# Idempotency: a re-sync reports unchanged, keeps the number, and never
+# creates a second milestone.
+ms_log_after_create="$(log_count "api repos/RTwoStudio/orbit/milestones" "$STUB_BIN/gh.log")"
+run cycles cycle sync --json
+assert_rc "cycle sync --json (github, re-run)" 0
+assert_out_has "cycle re-sync action unchanged" '"action": "unchanged"'
+assert_out_has "cycle re-sync keeps the number" "\"number\": $gh_ms"
+[ "$(log_count "api repos/RTwoStudio/orbit/milestones" "$STUB_BIN/gh.log")" = "$ms_log_after_create" ] \
+  && ok "no second milestone create in gh.log" || bad "a second milestone create reached gh.log"
+
+# Human render: header + one milestone row.
+run cycles cycle sync
+assert_rc "cycle sync (human)" 0
+assert_out_has "cycle human header" "Synced cycle $c2 — $g2"
+assert_out_has "cycle human row" "RTwoStudio/orbit#$gh_ms (github)"
+
+# work sync: JSON creates, a re-run updates in place, the human line matches.
+run cycles work sync "$w3" --json
+assert_rc "work sync --json (github)" 0
+assert_out_has "work sync json action created" '"action": "created"'
+assert_out_has "work sync json provider github" '"provider": "github"'
+assert_out_has "work sync json repo" '"repo": "RTwoStudio/orbit"'
+assert_out_has "work sync json milestone" "\"milestone\": $gh_ms"
+gh_issue="$(json_num issue "$LAST_OUT")"
+[ -n "$gh_issue" ] && [ "$gh_issue" -gt 0 ] \
+  && ok "work sync recorded issue #$gh_issue" \
+  || bad "work sync issue number not found in $LAST_OUT"
+assert_has "work note records provider" "provider: github" "$w3_path"
+assert_has "work note records repo" "repo: RTwoStudio/orbit" "$w3_path"
+assert_has "work note records issue" "issue: $gh_issue" "$w3_path"
+assert_has "work note records milestone" "milestone: $gh_ms" "$w3_path"
+
+gh_create_1="$(log_count 'issue create' "$STUB_BIN/gh.log")"
+run cycles work sync "$w3" --json
+assert_rc "work sync --json (github, re-run)" 0
+assert_out_has "work re-sync action updated" '"action": "updated"'
+assert_out_has "work re-sync keeps the issue" "\"issue\": $gh_issue"
+[ "$(log_count 'issue create' "$STUB_BIN/gh.log")" = "$gh_create_1" ] \
+  && ok "no second issue create in gh.log" || bad "a second issue create reached gh.log"
+assert_has "re-sync edited/assigned via gh" "issue edit" "$STUB_BIN/gh.log"
+
+run cycles work sync "$w3"
+assert_rc "work sync (human)" 0
+assert_out_has "work sync human line" "$w3 → issue #$gh_issue (updated), milestone #$gh_ms (RTwoStudio/orbit, github)"
+
+# A bet with no project: is skipped by cycle sync and contributes no milestone.
+run cycles work new "Unscoped bet" --scope forge-app --json
+assert_rc "work new (unscoped)" 0
+w4="$(json_field id "$LAST_OUT")"
+w4_backlog="$(json_field path "$LAST_OUT")"
+fill_shape "$w4_backlog"
+run cycles work shape "$w4" --appetite small --json
+assert_rc "work shape (unscoped)" 0
+run cycles work bet "$w4" --json
+assert_rc "work bet (unscoped)" 0
+w4_path="$(json_field path "$LAST_OUT")"
+assert_grep "unscoped bet has an empty project:" "^project:$" "$w4_path"
+
+ms_log_before_skip="$(log_count "api repos/RTwoStudio/orbit/milestones" "$STUB_BIN/gh.log")"
+run cycles cycle sync --json
+assert_rc "cycle sync with a no-project bet" 0
+assert_out_has "skip reports the bet id" "\"id\": \"$w4\""
+assert_out_has "skip reports the reason" '"reason": "no project: set"'
+[ "$(log_count "api repos/RTwoStudio/orbit/milestones" "$STUB_BIN/gh.log")" = "$ms_log_before_skip" ] \
+  && ok "skipped bet mints no milestone" || bad "skipped bet minted a milestone"
+
+# work sync --project persists the override and reuses the recorded milestone.
+run cycles work sync "$w4" --project "$TMP/proj-gh" --json
+assert_rc "work sync --project override" 0
+assert_out_has "override action created" '"action": "created"'
+assert_out_has "override reuses the recorded milestone" "\"milestone\": $gh_ms"
+assert_has "override persists project: into the note" "project: $TMP/proj-gh" "$w4_path"
+
+# Degradation: missing CLI (git-only PATH) and unauthenticated stub.
+run_no_forge cycles work sync "$w3"
+assert_rc "work sync without gh → 1" 1
+assert_has "work sync missing-CLI hint" "not found on PATH" "$TMP/.stderr"
+
+export GH_STUB_UNAUTH=1
+run cycles work sync "$w3"
+unset GH_STUB_UNAUTH
+assert_rc "work sync unauthenticated gh → 1" 1
+assert_has "work sync unauth hint" "not authenticated" "$TMP/.stderr"
+
+# --- gitlab: the same flow through glab ------------------------------------
+run cycles cycle close --json
+assert_rc "cycle close (forge gh)" 0
+
+run cycles cycle new "Forge gitlab sync" --release 0.5.0 --json
+assert_rc "cycle new (forge glab)" 0
+c3="$(json_field id "$LAST_OUT")"
+g3="$(json_field goal "$LAST_OUT")"
+c3_note="$VAULT/Cycles/cycles/$c3/$c3.md"
+
+run cycles work new "Ship to gitlab" --scope forge-app --json
+assert_rc "work new (forge glab)" 0
+w5="$(json_field id "$LAST_OUT")"
+w5_backlog="$(json_field path "$LAST_OUT")"
+fill_shape "$w5_backlog"
+run cycles work shape "$w5" --appetite small --json
+assert_rc "work shape (forge glab)" 0
+run cycles work bet "$w5" --json
+assert_rc "work bet (forge glab)" 0
+w5_path="$(json_field path "$LAST_OUT")"
+sed -i "s|^project:.*|project: $TMP/proj-gl|" "$w5_path"
+assert_has "forge glab bet seeded with project" "project: $TMP/proj-gl" "$w5_path"
+
+# The human run creates (header + a created row); --json re-runs unchanged and
+# proves the recorded key + the URL-escaped glab endpoint.
+run cycles cycle sync
+assert_rc "cycle sync (gitlab, human)" 0
+assert_out_has "gitlab cycle header" "Synced cycle $c3 — $g3"
+assert_out_has "gitlab created row" "created"
+assert_out_has "gitlab milestone row" "rtwo/orbit#"
+assert_out_has "gitlab provider row" "(gitlab)"
+
+run cycles cycle sync --json
+assert_rc "cycle sync --json (gitlab, unchanged)" 0
+assert_out_has "glab milestone provider" '"provider": "gitlab"'
+assert_out_has "glab milestone repo" '"repo": "rtwo/orbit"'
+gl_ms="$(json_num number "$LAST_OUT")"
+[ -n "$gl_ms" ] && [ "$gl_ms" -gt 0 ] \
+  && ok "glab cycle recorded milestone #$gl_ms" || bad "glab milestone number not found"
+assert_has "gitlab cycle provider" "provider: gitlab" "$c3_note"
+assert_has "gitlab cycle repo" "repo: rtwo/orbit" "$c3_note"
+assert_grep "gitlab milestone map entry" "rtwo/orbit: \"?$gl_ms\"?" "$c3_note"
+assert_has "glab saw the URL-escaped endpoint" "projects/rtwo%2Forbit/milestones" "$STUB_BIN/glab.log"
+assert_grep "glab milestone gets a bare due_date" "due_date=[0-9]{4}-[0-9]{2}-[0-9]{2}$" "$STUB_BIN/glab.log"
+
+# work sync through glab: human creates, --json re-runs updated.
+run cycles work sync "$w5"
+assert_rc "work sync (gitlab, human)" 0
+assert_out_has "glab work human line" "$w5 → issue #"
+
+run cycles work sync "$w5" --json
+assert_rc "work sync --json (gitlab, updated)" 0
+assert_out_has "glab work action updated" '"action": "updated"'
+assert_out_has "glab work provider" '"provider": "gitlab"'
+assert_out_has "glab work repo" '"repo": "rtwo/orbit"'
+assert_out_has "glab work milestone" "\"milestone\": $gl_ms"
+gl_issue="$(json_num issue "$LAST_OUT")"
+[ -n "$gl_issue" ] && [ "$gl_issue" -gt 0 ] \
+  && ok "glab work recorded issue #$gl_issue" || bad "glab issue number not found"
+assert_has "work note records gitlab provider" "provider: gitlab" "$w5_path"
+assert_has "work note records gitlab issue" "issue: $gl_issue" "$w5_path"
+assert_has "glab issue URL uses the /-/issues/ form" "https://gitlab.com/rtwo/orbit/-/issues/$gl_issue" "$STUB_BIN/glab.log"
 
 # ---------------------------------------------------------------------------
 section "summary"

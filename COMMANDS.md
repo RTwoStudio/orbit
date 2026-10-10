@@ -438,7 +438,10 @@ handoff for execution. The vault root resolves as `--vault` (one-shot override)
 > `config.vault.dir`.
 
 The `cycles` group and every subcommand carry the persistent `--vault <dir>`
-flag; `--json` (global) is first-class on every read verb.
+flag; `--json` (global) is first-class on every read verb. Cycles is **offline
+by default** — the only network-touching verbs are `work sync` and
+`cycle sync`, which mirror bets/cycles to GitHub/GitLab issues and milestones
+via the `gh`/`glab` CLIs.
 
 Lifecycle: work `Backlog → Pitched → Bet → Delivered` (`Shelved` reachable from
 the pre-bet/bet stages; `unshelve` returns to `Pitched`); cycles `Open →
@@ -512,6 +515,32 @@ Human output prints the note verbatim; `--json` emits the typed `WorkItem`.
 
 Exit codes: 0 · 2 · 5 · 6 · 10.
 
+### `work sync <W-####> [--project <dir>]`
+
+**Network verb.** Create or update the git issue for a **Bet** and assign it to
+the open cycle's milestone. Shells out to the `gh` (GitHub) or `glab` (GitLab)
+CLI and reuses the operator's existing login.
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--project <dir>` | string | project dir whose git `origin` remote targets the forge (default: the note's `project:`) |
+
+Preflight: the item must be `Bet` (else exit 7). The target repo is derived
+from the project's git `origin` remote; the project comes from `--project` when
+given, else the note's `project:` — a Bet with neither is exit 6. A
+missing/unauthenticated forge CLI is exit 1. On first run the issue is created;
+every later run updates and re-assigns in place (idempotent). `work sync` never
+mints a milestone: if the bet's repo has no recorded milestone it is exit 7
+pointing at `orbit cycles cycle sync`.
+
+Exit codes: 0 · 1 · 2 · 3 · 5 · 6 · 7 · 10.
+
+```sh
+orbit cycles work sync W-0003
+orbit cycles work sync W-0003 --project ../orbit
+orbit cycles work sync W-0003 --json
+```
+
 ## `orbit cycles cycle` — cycles
 
 ### `cycle new "<goal>" --release <semver> [--start <date>] [--end <date>]`
@@ -550,6 +579,25 @@ including its regenerated `## Bets` view.
 
 Exit codes: 0 · 2 · 5 · 6 · 10.
 
+### `cycle sync`
+
+**Network verb.** Create one forge milestone per distinct repo among the open
+cycle's bets (title `C-#### — <goal>`, due = the cycle's `end`) and record each
+number in the cycle's `milestone` map. Shells out to `gh`/`glab` and reuses the
+operator's existing login. Accepts `--json`.
+
+Preflight: a cycle must be open (else exit 7). Repos come from each bet's
+`project:`; a bet with no project is reported and skipped. A repo whose
+milestone is already recorded is left untouched (idempotent); a missing or
+unauthenticated forge CLI is exit 1.
+
+Exit codes: 0 · 1 · 2 · 3 · 5 · 6 · 7 · 10.
+
+```sh
+orbit cycles cycle sync
+orbit cycles cycle sync --json
+```
+
 ## `orbit cycles status`
 
 Render the board: the open cycle (or "No open cycle.") plus the labelled
@@ -573,7 +621,9 @@ Exit codes: 0 · 2 · 3 · 5 · 10.
 | `orbit cycles work new` | `--scope <s>` (required) |
 | `orbit cycles work shape` | `--appetite big\|small` (required) |
 | `orbit cycles work list` | `--status <s>`, `--scope <s>` |
+| `orbit cycles work sync` | `--project <dir>`, `--json` |
 | `orbit cycles cycle new` | `--release <semver>` (required), `--start <date>`, `--end <date>` |
+| `orbit cycles cycle sync` | `--json` |
 | `orbit cycles work show` / `cycle show` | `--json` |
 | all other commands | operands only (+ global flags) |
 
@@ -611,6 +661,8 @@ orbit cycles work new "Voice search" --scope delijan-driver-app
 orbit cycles work shape W-0001 --appetite small              # after filling the shape sections
 orbit cycles cycle new "Driver search hardening" --release 0.3.0
 orbit cycles work bet W-0001
+orbit cycles cycle sync                                      # network: mint one milestone per distinct repo
+orbit cycles work sync W-0001 --project ~/dev/delijan-app    # network: Bet issue → assigned to its milestone
 orbit cycles work deliver W-0001                             # human-only
 orbit cycles work new "Offline mode" --scope delijan-driver-app
 orbit cycles work shape W-0002 --appetite big

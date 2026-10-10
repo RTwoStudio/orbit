@@ -27,8 +27,8 @@ Markdown is the source of truth; NeoCortex consumes the handoff for execution.
 
 Command groups:
   install   Bootstrap the vault: cache + deploy assets + create Cycles/ (alias: init)
-  work      Capture and move work items (new/shape/bet/shelve/unshelve/deliver/list/show)
-  cycle     Open and close cycles (new/close/list/show)
+  work      Capture and move work items (new/shape/bet/shelve/unshelve/deliver/sync/list/show)
+  cycle     Open and close cycles (new/close/sync/list/show)
   status    Render the board: current cycle + backlog ladder
 
 Exit codes:

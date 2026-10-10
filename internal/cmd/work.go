@@ -14,7 +14,7 @@ import (
 func newCyclesWorkCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "work",
-		Short: "Capture and move work items (new/shape/bet/shelve/unshelve/deliver/list/show)",
+		Short: "Capture and move work items (new/shape/bet/shelve/unshelve/deliver/sync/list/show)",
 		Long: `Manage work items across the flat workflow:
 
   Backlog → Pitched → Bet → Delivered, with Shelved reachable from the
@@ -27,6 +27,7 @@ Subcommands:
   shelve <W-####>                          Park an item (→ Shelved)
   unshelve <W-####>                        Shelved → Pitched
   deliver <W-####>                         Bet → Delivered (terminal)
+  sync <W-####> [--project <dir>]          Sync a Bet's issue to the forge (network)
   list [--status <s>] [--scope <s>]        Table of work items (--json)
   show <W-####>                            Print the work note (--json)
 
@@ -50,6 +51,7 @@ Exit codes:
 		newCyclesWorkShelveCmd(),
 		newCyclesWorkUnshelveCmd(),
 		newCyclesWorkDeliverCmd(),
+		newCyclesWorkSyncCmd(),
 		newCyclesWorkListCmd(),
 		newCyclesWorkShowCmd(),
 	)
