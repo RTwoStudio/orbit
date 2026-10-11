@@ -57,7 +57,7 @@ func (f *fakeClient) CreateMilestone(_ context.Context, title, due string) (forg
 	}, nil
 }
 
-func (f *fakeClient) AssignIssue(context.Context, int, int) error { return nil }
+func (f *fakeClient) AssignIssue(context.Context, int, string) error { return nil }
 
 func (f *fakeClient) SetIssueAssignees(context.Context, int, []string) error { return nil }
 

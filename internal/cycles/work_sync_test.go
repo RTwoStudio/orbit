@@ -39,7 +39,7 @@ type wfClient struct {
 	updateNum     int
 	updateSpec    forge.IssueSpec
 	assignIssue   int
-	assignMS      int
+	assignMS      string
 	issueAsgIssue int
 	issueAsgUsers []string
 }
@@ -78,7 +78,7 @@ func (c *wfClient) CreateMilestone(context.Context, string, string) (forge.Miles
 	return forge.Milestone{}, nil
 }
 
-func (c *wfClient) AssignIssue(_ context.Context, issue, milestone int) error {
+func (c *wfClient) AssignIssue(_ context.Context, issue int, milestone string) error {
 	c.assignCalls++
 	c.assignIssue = issue
 	c.assignMS = milestone
@@ -204,8 +204,8 @@ func TestSyncWorkCreatesIssue(t *testing.T) {
 	if cl.createSpec.Body != issueBody {
 		t.Errorf("body = %q, want %q", cl.createSpec.Body, issueBody)
 	}
-	if cl.assignCalls != 1 || cl.assignIssue != 1 || cl.assignMS != 7 {
-		t.Errorf("assign = %d issue=%d milestone=%d, want 1/1/7", cl.assignCalls, cl.assignIssue, cl.assignMS)
+	if cl.assignCalls != 1 || cl.assignIssue != 1 || cl.assignMS != "C-0001 — Ship v1" {
+		t.Errorf("assign = %d issue=%d milestone=%q, want 1/1/%q", cl.assignCalls, cl.assignIssue, cl.assignMS, "C-0001 — Ship v1")
 	}
 
 	// Recorded on disk; body untouched.

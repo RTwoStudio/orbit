@@ -44,8 +44,9 @@ type Client interface {
 	// CreateMilestone creates a milestone with an optional due date (a plain
 	// YYYY-MM-DD or RFC3339 string; provider encoding is the impl's job).
 	CreateMilestone(ctx context.Context, title, due string) (Milestone, error)
-	// AssignIssue attaches an issue to a milestone.
-	AssignIssue(ctx context.Context, issue, milestone int) error
+	// AssignIssue attaches an issue to a milestone by title. Both `gh` and
+	// `glab` resolve `--milestone` by name, not by number.
+	AssignIssue(ctx context.Context, issue int, milestone string) error
 	// SetIssueAssignees adds the given forge usernames as assignees of an issue.
 	// It is additive/idempotent — a username already assigned is left in place
 	// and none is ever removed.
@@ -116,16 +117,18 @@ type githubClient struct{ client }
 // gitlabClient wraps the glab CLI.
 type gitlabClient struct{ client }
 
-var issueURLRe = regexp.MustCompile(`/issues/(\d+)`)
+var issueURLRe = regexp.MustCompile(`/(?:issues|work_items)/(\d+)`)
 
 // issueNumberFromURL extracts the trailing <number> from an issue URL. It
-// matches both GitHub (.../issues/5) and GitLab (.../-/issues/5) shapes.
+// matches the GitHub (.../issues/5) and GitLab shapes — both the classic
+// (.../-/issues/5) and the newer work-item (.../-/work_items/5) URL that
+// recent GitLab versions print.
 func issueNumberFromURL(rawURL string) (int, error) {
 	m := issueURLRe.FindStringSubmatch(rawURL)
 	if m == nil {
 		return 0, exit.New(exit.General,
 			fmt.Sprintf("cannot parse issue number from URL %q", rawURL),
-			"expected a URL containing /issues/<number>")
+			"expected a URL containing /issues/<number> or /work_items/<number>")
 	}
 	n, err := strconv.Atoi(m[1])
 	if err != nil || n <= 0 {

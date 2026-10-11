@@ -94,11 +94,12 @@ func (c *gitlabClient) CreateMilestone(ctx context.Context, title, due string) (
 	return Milestone{Number: resp.IID, Title: resp.Title, URL: resp.WebURL}, nil
 }
 
-// AssignIssue attaches an issue to a milestone.
-func (c *gitlabClient) AssignIssue(ctx context.Context, issue, milestone int) error {
+// AssignIssue attaches an issue to a milestone by title (glab resolves
+// --milestone by name, not by number — a numeric value silently no-ops).
+func (c *gitlabClient) AssignIssue(ctx context.Context, issue int, milestone string) error {
 	if _, err := c.run(ctx, glabCLI, "issue", "update", strconv.Itoa(issue),
 		"--repo", c.remote.Slug(),
-		"--milestone", strconv.Itoa(milestone),
+		"--milestone", milestone,
 	); err != nil {
 		return exit.Wrap(exit.General, err, "glab issue update --milestone failed")
 	}

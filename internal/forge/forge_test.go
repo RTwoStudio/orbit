@@ -173,11 +173,11 @@ func TestGitHubAssignIssue(t *testing.T) {
 	fr := &fakeRunner{}
 	c := New(ghRemote(), withRunner(fr.run))
 
-	if err := c.AssignIssue(context.Background(), 42, 3); err != nil {
+	if err := c.AssignIssue(context.Background(), 42, "v1.0"); err != nil {
 		t.Fatalf("AssignIssue: %v", err)
 	}
 	assertCalls(t, fr.calls, call{"gh", []string{
-		"issue", "edit", "42", "--repo", "RTwoStudio/orbit", "--milestone", "3",
+		"issue", "edit", "42", "--repo", "RTwoStudio/orbit", "--milestone", "v1.0",
 	}})
 }
 
@@ -215,6 +215,22 @@ func TestGitLabCreateIssue(t *testing.T) {
 		"issue", "create", "--repo", "RTwoStudio/orbit",
 		"--title", "Add sync", "--description", "Body text", "--yes",
 	}})
+}
+
+// TestGitLabCreateIssueWorkItemsURL pins the newer GitLab work-item URL shape
+// (/-/work_items/9) that recent GitLab versions print from `glab issue create`.
+func TestGitLabCreateIssueWorkItemsURL(t *testing.T) {
+	const url = "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/work_items/9"
+	fr := &fakeRunner{outputs: [][]byte{[]byte("Creating issue in delijan/web/delijan-login-panel\n\n" + url + "\n")}}
+	c := New(glRemote(), withRunner(fr.run))
+
+	got, err := c.CreateIssue(context.Background(), IssueSpec{Title: "Add sync", Body: "Body text"})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if got.Number != 9 || got.URL != url {
+		t.Errorf("CreateIssue = %+v, want {9 %s}", got, url)
+	}
 }
 
 func TestGitLabUpdateIssue(t *testing.T) {
@@ -271,11 +287,11 @@ func TestGitLabAssignIssue(t *testing.T) {
 	fr := &fakeRunner{}
 	c := New(glRemote(), withRunner(fr.run))
 
-	if err := c.AssignIssue(context.Background(), 9, 4); err != nil {
+	if err := c.AssignIssue(context.Background(), 9, "C-0001 — Goal"); err != nil {
 		t.Fatalf("AssignIssue: %v", err)
 	}
 	assertCalls(t, fr.calls, call{"glab", []string{
-		"issue", "update", "9", "--repo", "RTwoStudio/orbit", "--milestone", "4",
+		"issue", "update", "9", "--repo", "RTwoStudio/orbit", "--milestone", "C-0001 — Goal",
 	}})
 }
 

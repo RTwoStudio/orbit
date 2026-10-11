@@ -82,6 +82,18 @@ func (s *Store) SyncWork(ctx context.Context, id, projectOverride string) (*Work
 		return nil, err // a coded resolution error passes through unchanged
 	}
 
+	// Persist a non-empty override immediately, before the milestone lookup.
+	// `--project` is the only way to set `project:` on a bet that lacks one, so
+	// it must survive the "no milestone" error below — otherwise the bootstrap
+	// deadlocks: `cycle sync` needs the project to mint the milestone, and
+	// `work sync` needs the milestone to record the project.
+	if override && project != noteProject {
+		d.Set("project", project)
+		if err := d.Save(); err != nil {
+			return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+d.Path)
+		}
+	}
+
 	cycleID := strings.TrimSpace(d.Get("cycle"))
 	if cycleID == "" {
 		return nil, exit.New(exit.StateConflict,
@@ -124,14 +136,8 @@ func (s *Store) SyncWork(ctx context.Context, id, projectOverride string) (*Work
 		number = it.Issue // a wrapper that prints no number: keep the known one
 	}
 
-	// Persist the applied override and the forge links BEFORE assigning, so a
-	// failed assignment can never orphan the issue; a later retry is idempotent.
-	if override && project != noteProject {
-		d.Set("project", project)
-		if err := d.Save(); err != nil {
-			return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+d.Path)
-		}
-	}
+	// Record the forge links before assigning, so a failed assignment can never
+	// orphan the issue; a later retry is idempotent.
 	work, err := s.SetWorkForge(it.ID, WorkForge{
 		Provider:  remote.Provider,
 		Repo:      remote.Slug(),
@@ -142,7 +148,7 @@ func (s *Store) SyncWork(ctx context.Context, id, projectOverride string) (*Work
 		return nil, err
 	}
 
-	if err := client.AssignIssue(ctx, number, milestone); err != nil {
+	if err := client.AssignIssue(ctx, number, milestoneTitle(cy)); err != nil {
 		return nil, err
 	}
 

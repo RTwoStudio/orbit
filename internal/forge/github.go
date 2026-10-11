@@ -90,11 +90,12 @@ func (c *githubClient) CreateMilestone(ctx context.Context, title, due string) (
 	return Milestone{Number: resp.Number, Title: resp.Title, URL: resp.HTMLURL}, nil
 }
 
-// AssignIssue attaches an issue to a milestone by number.
-func (c *githubClient) AssignIssue(ctx context.Context, issue, milestone int) error {
+// AssignIssue attaches an issue to a milestone by title (gh resolves
+// --milestone by name).
+func (c *githubClient) AssignIssue(ctx context.Context, issue int, milestone string) error {
 	if _, err := c.run(ctx, ghCLI, "issue", "edit", strconv.Itoa(issue),
 		"--repo", c.remote.Slug(),
-		"--milestone", strconv.Itoa(milestone),
+		"--milestone", milestone,
 	); err != nil {
 		return exit.Wrap(exit.General, err, "gh issue edit --milestone failed")
 	}
