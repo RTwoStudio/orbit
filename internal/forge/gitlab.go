@@ -105,6 +105,17 @@ func (c *gitlabClient) AssignIssue(ctx context.Context, issue, milestone int) er
 	return nil
 }
 
+// SetIssueAssignees adds usernames to a GitLab issue's assignees (additive).
+func (c *gitlabClient) SetIssueAssignees(ctx context.Context, issue int, usernames []string) error {
+	if _, err := c.run(ctx, glabCLI, "issue", "update", strconv.Itoa(issue),
+		"--repo", c.remote.Slug(),
+		"--assignee", strings.Join(usernames, ","),
+	); err != nil {
+		return exit.Wrap(exit.General, err, "glab issue update --assignee failed")
+	}
+	return nil
+}
+
 // issueURL reconstructs the canonical web URL of a GitLab issue.
 func (c *gitlabClient) issueURL(number int) string {
 	return fmt.Sprintf("https://%s/%s/-/issues/%d", c.remote.Host, c.remote.Slug(), number)

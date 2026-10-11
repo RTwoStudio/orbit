@@ -149,3 +149,27 @@ func currentContents(t *testing.T, s *Store) string {
 	}
 	return strings.TrimSpace(string(data))
 }
+
+// TestReadCurrentDuplicateLoud: a valid CURRENT pointer into a vault that also
+// carries a duplicate C-#### note fails loudly on the read (design §5) and must
+// NOT auto-clear the pointer.
+func TestReadCurrentDuplicateLoud(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Dup", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	orig := filepath.Join(s.CycleDir("C-0001"), "C-0001.md")
+	dup := writeCycleNote(t, s, "C-0001-copy", "C-0001.md", "C-0001", "2026-01-02T00:00:00Z", testOwnerHandle)
+
+	_, err := s.ReadCurrent()
+	if codeOf(t, err) != exit.StateConflict {
+		t.Fatalf("duplicate CURRENT read code = %v, want state_conflict", codeOf(t, err))
+	}
+	msg := errMessage(t, err)
+	if !strings.Contains(msg, orig) || !strings.Contains(msg, dup) {
+		t.Errorf("message %q must name both %q and %q", msg, orig, dup)
+	}
+	if got := currentContents(t, s); got != "C-0001" {
+		t.Errorf("CURRENT = %q, want C-0001 (a duplicate must not auto-clear)", got)
+	}
+}

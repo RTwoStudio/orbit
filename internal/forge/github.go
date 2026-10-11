@@ -101,6 +101,18 @@ func (c *githubClient) AssignIssue(ctx context.Context, issue, milestone int) er
 	return nil
 }
 
+// SetIssueAssignees adds usernames to a GitHub issue's assignees (additive:
+// `--add-assignee` never removes an existing assignee).
+func (c *githubClient) SetIssueAssignees(ctx context.Context, issue int, usernames []string) error {
+	if _, err := c.run(ctx, ghCLI, "issue", "edit", strconv.Itoa(issue),
+		"--repo", c.remote.Slug(),
+		"--add-assignee", strings.Join(usernames, ","),
+	); err != nil {
+		return exit.Wrap(exit.General, err, "gh issue edit --add-assignee failed")
+	}
+	return nil
+}
+
 // issueURL reconstructs the canonical web URL of a GitHub issue.
 func (c *githubClient) issueURL(number int) string {
 	return fmt.Sprintf("https://%s/%s/issues/%d", c.remote.Host, c.remote.Slug(), number)

@@ -25,6 +25,7 @@ type WorkSyncReport struct {
 	Repo      string    `json:"repo"`
 	Issue     int       `json:"issue"`
 	Milestone int       `json:"milestone"`
+	Assignees []string  `json:"assignees"`
 	Action    string    `json:"action"`
 }
 
@@ -46,6 +47,11 @@ type WorkSyncReport struct {
 // persisted before AssignIssue, so an assignment failure can never orphan a
 // created issue; a retry updates in place. A non-empty override is persisted
 // into `project:`.
+//
+// After the milestone assignment it maps the stored `assignees:` handles to the
+// provider's forge usernames via the roster and sets them on the issue; an empty
+// stored list, an unknown handle, or a handle with no username for the provider
+// is a preflight_failed (6).
 func (s *Store) SyncWork(ctx context.Context, id, projectOverride string) (*WorkSyncReport, error) {
 	d, err := s.findAndParse(id)
 	if err != nil {
@@ -140,15 +146,66 @@ func (s *Store) SyncWork(ctx context.Context, id, projectOverride string) (*Work
 		return nil, err
 	}
 
-	logx.Info("work sync id=%s issue=%d milestone=%d action=%s", it.ID, number, milestone, action)
+	// Map the stored handles to forge usernames via the roster and set the
+	// issue's assignees — the visible, real-time claim that prevents
+	// double-pickup. This runs after the milestone assignment so the recorded
+	// forge links (persisted above) are never lost to a later failure.
+	usernames, err := s.resolveAssigneeUsernames(work.Assignees, remote)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.SetIssueAssignees(ctx, number, usernames); err != nil {
+		return nil, err
+	}
+
+	logx.Info("work sync id=%s issue=%d milestone=%d assignees=%d action=%s", it.ID, number, milestone, len(usernames), action)
 	return &WorkSyncReport{
 		Work:      work,
 		Provider:  remote.Provider,
 		Repo:      remote.Slug(),
 		Issue:     number,
 		Milestone: milestone,
+		Assignees: usernames,
 		Action:    action,
 	}, nil
+}
+
+// resolveAssigneeUsernames maps a work item's stored `assignees:` handles to the
+// forge usernames for remote's provider (github → Developer.GitHub, gitlab →
+// Developer.GitLab). An empty stored list, an unknown handle, or a handle with
+// no username for the target provider is a preflight_failed (6) naming the
+// handle and provider, so the mapping fails loudly rather than silently
+// skipping a claim.
+func (s *Store) resolveAssigneeUsernames(handles []string, remote forge.Remote) ([]string, error) {
+	if len(handles) == 0 {
+		return nil, exit.New(exit.PreflightFailed,
+			"work has no assignees — a Bet must carry at least one assignee to sync",
+			"re-bet with: orbit cycles work bet <id> --assignee <handle>")
+	}
+	r, err := s.LoadRoster()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(handles))
+	for _, h := range handles {
+		dev, ok := r.Lookup(h)
+		if !ok {
+			return nil, exit.New(exit.PreflightFailed,
+				fmt.Sprintf("unknown assignee %q — not in the developer roster", h),
+				"add the handle to "+s.RosterPath()+" first")
+		}
+		username := dev.GitHub
+		if remote.Provider == forge.ProviderGitLab {
+			username = dev.GitLab
+		}
+		if username == "" {
+			return nil, exit.New(exit.PreflightFailed,
+				fmt.Sprintf("assignee %q has no %s username in the developer roster", h, remote.Provider),
+				"add "+remote.Provider+": <username> to "+s.RosterPath())
+		}
+		out = append(out, username)
+	}
+	return out, nil
 }
 
 // renderIssueBody seeds a git issue body from a work note's shape: each

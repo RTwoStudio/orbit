@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,23 +21,27 @@ import (
 type wfClient struct {
 	provider string
 
-	availErr  error
-	createErr error
-	updateErr error
-	assignErr error
+	availErr    error
+	createErr   error
+	updateErr   error
+	assignErr   error
+	issueAsgErr error
 
-	availCalls  int
-	createCalls int
-	updateCalls int
-	assignCalls int
+	availCalls    int
+	createCalls   int
+	updateCalls   int
+	assignCalls   int
+	issueAsgCalls int
 
 	nextIssue int
 
-	createSpec  forge.IssueSpec
-	updateNum   int
-	updateSpec  forge.IssueSpec
-	assignIssue int
-	assignMS    int
+	createSpec    forge.IssueSpec
+	updateNum     int
+	updateSpec    forge.IssueSpec
+	assignIssue   int
+	assignMS      int
+	issueAsgIssue int
+	issueAsgUsers []string
 }
 
 var _ forge.Client = (*wfClient)(nil)
@@ -78,6 +83,13 @@ func (c *wfClient) AssignIssue(_ context.Context, issue, milestone int) error {
 	c.assignIssue = issue
 	c.assignMS = milestone
 	return c.assignErr
+}
+
+func (c *wfClient) SetIssueAssignees(_ context.Context, issue int, usernames []string) error {
+	c.issueAsgCalls++
+	c.issueAsgIssue = issue
+	c.issueAsgUsers = usernames
+	return c.issueAsgErr
 }
 
 // wfHarness installs fresh resolveRemote/newForgeClient seams for one test.
@@ -328,7 +340,7 @@ func TestSyncWorkNonBet(t *testing.T) {
 		if _, err := s.ShapeWork(it.ID, "small"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.BetWork(it.ID); err != nil {
+		if _, err := s.BetWork(it.ID, []string{testOwnerHandle}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.DeliverWork(it.ID); err != nil {
@@ -565,6 +577,7 @@ func TestWorkSyncReportJSONShape(t *testing.T) {
 		Repo:      "RTwoStudio/orbit",
 		Issue:     1,
 		Milestone: 7,
+		Assignees: []string{"arashjf"},
 		Action:    SyncCreated,
 	}
 	data, err := json.Marshal(rep)
@@ -573,10 +586,214 @@ func TestWorkSyncReportJSONShape(t *testing.T) {
 	}
 	for _, key := range []string{
 		`"work"`, `"provider":"github"`, `"repo":"RTwoStudio/orbit"`,
-		`"issue":1`, `"milestone":7`, `"action":"created"`,
+		`"issue":1`, `"milestone":7`, `"assignees":["arashjf"]`, `"action":"created"`,
 	} {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("marshalled report missing %s: %s", key, data)
 		}
+	}
+}
+
+// forgeRoster maps two handles to distinct github/gitlab usernames so the
+// provider-selection mapping is observable; arash's name/email match the vault
+// clone's git identity so NewWork resolves.
+const forgeRoster = "arash-jafarpour:\n" +
+	"  name: Arash Jafarpour\n" +
+	"  email: arash@example.com\n" +
+	"  github: arashjf\n" +
+	"  gitlab: arash-jf-gl\n" +
+	"seyed-mahdi-rostami:\n" +
+	"  name: Seyed Mahdi Rostami\n" +
+	"  email: seyed@example.com\n" +
+	"  github: seyedmr\n" +
+	"  gitlab: seyed-mr-gl\n"
+
+// TestSyncWorkMapsAssigneesPerProvider: work sync resolves each stored handle to
+// the repo provider's roster username (github → GitHub, gitlab → GitLab), sets
+// them on the issue after the milestone assignment, and reports them.
+func TestSyncWorkMapsAssigneesPerProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		remote   forge.Remote
+		provider string
+		want     []string
+	}{
+		{"github", ghRemote("RTwoStudio", "orbit"), "github", []string{"seyedmr", "arashjf"}},
+		{"gitlab", glRemote("RTwoStudio", "orbit"), "gitlab", []string{"seyed-mr-gl", "arash-jf-gl"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := setupVault(t)
+			writeRoster(t, s, forgeRoster)
+			if _, err := s.NewCycle("Ship v1", "0.1.0", "", ""); err != nil {
+				t.Fatal(err)
+			}
+			it := betWithAssignees(t, s, "Assigned", "scope-a", "/p/orbit",
+				[]string{"seyed-mahdi-rostami", "arash-jafarpour"})
+			seedMilestone(t, s, "RTwoStudio/orbit", 7)
+
+			h := &wfHarness{resolve: map[string]forge.Remote{"/p/orbit": tc.remote}}
+			installWorkForge(t, h)
+
+			rep, err := s.SyncWork(context.Background(), it.ID, "")
+			if err != nil {
+				t.Fatalf("SyncWork: %v", err)
+			}
+			if !reflect.DeepEqual(rep.Assignees, tc.want) {
+				t.Errorf("report assignees = %v, want %v", rep.Assignees, tc.want)
+			}
+			cl := h.client(tc.provider)
+			if cl.assignCalls != 1 {
+				t.Errorf("AssignIssue calls = %d, want 1 (milestone first)", cl.assignCalls)
+			}
+			if cl.issueAsgCalls != 1 || cl.issueAsgIssue != 1 {
+				t.Errorf("SetIssueAssignees calls = %d issue=%d, want 1/1", cl.issueAsgCalls, cl.issueAsgIssue)
+			}
+			if !reflect.DeepEqual(cl.issueAsgUsers, tc.want) {
+				t.Errorf("SetIssueAssignees usernames = %v, want %v", cl.issueAsgUsers, tc.want)
+			}
+		})
+	}
+}
+
+// TestSyncWorkMissingProviderUsernameFails: a handle with no username for the
+// repo's provider is preflight_failed (6) naming the handle + provider, and no
+// assignee is set.
+func TestSyncWorkMissingProviderUsernameFails(t *testing.T) {
+	// gitlab-only roster: neither handle carries a github username.
+	const gitlabOnly = "arash-jafarpour:\n" +
+		"  name: Arash Jafarpour\n" +
+		"  email: arash@example.com\n" +
+		"  gitlab: arash-jf-gl\n" +
+		"seyed-mahdi-rostami:\n" +
+		"  name: Seyed Mahdi Rostami\n" +
+		"  email: seyed@example.com\n" +
+		"  gitlab: seyed-mr-gl\n"
+	s := setupVault(t)
+	writeRoster(t, s, gitlabOnly)
+	if _, err := s.NewCycle("Ship v1", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it := betWithAssignees(t, s, "No gh user", "scope-a", "/p/orbit", []string{"seyed-mahdi-rostami"})
+	seedMilestone(t, s, "RTwoStudio/orbit", 7)
+
+	h := &wfHarness{resolve: map[string]forge.Remote{"/p/orbit": ghRemote("RTwoStudio", "orbit")}}
+	installWorkForge(t, h)
+
+	_, err := s.SyncWork(context.Background(), it.ID, "")
+	if codeOf(t, err) != exit.PreflightFailed {
+		t.Fatalf("code = %v, want preflight_failed", codeOf(t, err))
+	}
+	var e *exit.Error
+	if !errors.As(err, &e) || !strings.Contains(e.Message, "seyed-mahdi-rostami") || !strings.Contains(e.Message, "github") {
+		t.Errorf("error should name the handle + provider: %v", err)
+	}
+	if h.client("github").issueAsgCalls != 0 {
+		t.Errorf("SetIssueAssignees calls = %d, want 0", h.client("github").issueAsgCalls)
+	}
+}
+
+// TestSyncWorkUnknownAssigneeFails: a stored handle absent from the roster
+// (a stale/foreign vault) is preflight_failed (6) and no assignee is set.
+func TestSyncWorkUnknownAssigneeFails(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Ship v1", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it := betWithAssignees(t, s, "Ghost", "scope-a", "/p/orbit", []string{testOwnerHandle})
+	seedMilestone(t, s, "RTwoStudio/orbit", 7)
+
+	stale, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := doc.ParseDoc(stale.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetStringList("assignees", []string{"ghost-handle"})
+	if err := d.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &wfHarness{resolve: map[string]forge.Remote{"/p/orbit": ghRemote("RTwoStudio", "orbit")}}
+	installWorkForge(t, h)
+
+	_, err = s.SyncWork(context.Background(), it.ID, "")
+	if codeOf(t, err) != exit.PreflightFailed {
+		t.Fatalf("code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if h.client("github").issueAsgCalls != 0 {
+		t.Errorf("SetIssueAssignees calls = %d, want 0", h.client("github").issueAsgCalls)
+	}
+}
+
+// TestSyncWorkEmptyAssigneesFails: a Bet whose stored list was cleared is
+// preflight_failed (6) and no assignee is set.
+func TestSyncWorkEmptyAssigneesFails(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Ship v1", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it := betWithAssignees(t, s, "Cleared", "scope-a", "/p/orbit", []string{testOwnerHandle})
+	seedMilestone(t, s, "RTwoStudio/orbit", 7)
+
+	cur, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := doc.ParseDoc(cur.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetStringList("assignees", nil)
+	if err := d.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &wfHarness{resolve: map[string]forge.Remote{"/p/orbit": ghRemote("RTwoStudio", "orbit")}}
+	installWorkForge(t, h)
+
+	_, err = s.SyncWork(context.Background(), it.ID, "")
+	if codeOf(t, err) != exit.PreflightFailed {
+		t.Fatalf("code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if h.client("github").issueAsgCalls != 0 {
+		t.Errorf("SetIssueAssignees calls = %d, want 0", h.client("github").issueAsgCalls)
+	}
+}
+
+// TestSyncWorkAssigneesFailureSurfaces: a SetIssueAssignees failure propagates
+// and the recorded forge links survive (a retry stays idempotent).
+func TestSyncWorkAssigneesFailureSurfaces(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Ship v1", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it := betWithAssignees(t, s, "Assign fails", "scope-a", "/p/orbit", []string{testOwnerHandle})
+	seedMilestone(t, s, "RTwoStudio/orbit", 7)
+
+	h := &wfHarness{resolve: map[string]forge.Remote{"/p/orbit": ghRemote("RTwoStudio", "orbit")}}
+	installWorkForge(t, h)
+	cl := h.client("github")
+	cl.issueAsgErr = exit.New(exit.General, "gh issue edit --add-assignee failed")
+
+	if _, err := s.SyncWork(context.Background(), it.ID, ""); codeOf(t, err) != exit.General {
+		t.Fatalf("code = %v, want general", codeOf(t, err))
+	}
+	show, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.Issue != 1 || show.Milestone != 7 {
+		t.Fatalf("recorded issue/milestone = %d/%d, want 1/7 despite the assignee failure", show.Issue, show.Milestone)
+	}
+
+	cl.issueAsgErr = nil
+	if _, err := s.SyncWork(context.Background(), it.ID, ""); err != nil {
+		t.Fatalf("retry SyncWork: %v", err)
+	}
+	if cl.createCalls != 1 {
+		t.Errorf("createCalls = %d, want 1 (no duplicate)", cl.createCalls)
 	}
 }

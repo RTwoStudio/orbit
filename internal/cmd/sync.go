@@ -24,6 +24,11 @@ given, else the note's ` + "`project:`" + `. A Bet with neither is exit 6, and a
 missing/unauthenticated forge CLI is exit 1. On first run the issue is created;
 every later run updates and re-assigns in place (idempotent).
 
+The item's ` + "`assignees:`" + ` handles are mapped to the repo's provider via the
+roster (handle → github/gitlab username) and set as the issue's assignees — the
+visible claim that prevents double-pickup. An empty stored list, an unknown
+handle, or a handle with no username for the provider is exit 6.
+
 Exit codes:
   0 ok · 1 general (forge CLI missing/unauthenticated or failed) · 2 usage
   3 config_error · 5 not_found · 6 preflight_failed · 7 state_conflict

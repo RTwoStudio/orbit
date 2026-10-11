@@ -14,7 +14,7 @@ import (
 func newCyclesCycleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cycle",
-		Short: "Open and close cycles (new/close/sync/list/show)",
+		Short: "Open, close, and validate cycles (new/close/sync/list/show/validate/reconcile)",
 		Long: `Manage time-boxed cycles. At most one cycle may be open at a time; the
 CURRENT pointer names it, and ` + "`cycle close`" + ` shelves every non-delivered bet.
 
@@ -25,6 +25,8 @@ Subcommands:
   sync                        Sync the open cycle's milestones (network)
   list                        Table of cycles (--json)
   show <C-####>               Print the cycle note (--json)
+  validate                    Scan for duplicate C-#### ids (--json)
+  reconcile                   Renumber duplicate cycle notes (--json)
 
 Exit codes:
   0 ok  2 usage  3 config_error  4 registry_unreachable  5 not_found
@@ -45,6 +47,8 @@ Exit codes:
 		newCyclesCycleSyncCmd(),
 		newCyclesCycleListCmd(),
 		newCyclesCycleShowCmd(),
+		newCyclesCycleValidateCmd(),
+		newCyclesCycleReconcileCmd(),
 	)
 	return cmd
 }
@@ -60,6 +64,11 @@ Preflight: the goal must be non-empty (exit 6); release must be strict
 MAJOR.MINOR.PATCH (exit 6); the vault must be initialized (exit 11); no cycle
 may already be open (exit 7). --start defaults to UTC today, --end to start +
 six weeks; both are bare YYYY-MM-DD and end must not precede start (exit 6).
+
+The id is allocated only after a clean post-pull vault: a duplicate C-#### or
+an already-existing id is a state_conflict (7) with a ` + "`git pull --rebase`" + `
+hint (reconcile with: orbit cycles cycle reconcile). The note path is
+deterministically cycles/C-####/C-####.md.
 
 Exit codes: 0 ok · 2 usage · 4 registry_unreachable · 6 preflight_failed
             7 state_conflict · 10 io_error · 11 not_initialized
@@ -194,6 +203,120 @@ Example:
 			}
 			_, werr := out.Write(data)
 			return werr
+		},
+	}
+	return cmd
+}
+
+// cycleValidateReport is the `cycle validate --json` payload.
+type cycleValidateReport struct {
+	OK         bool                     `json:"ok"`
+	Duplicates []cycles.CycleIDConflict `json:"duplicates"`
+}
+
+func newCyclesCycleValidateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "validate",
+		Short: "Scan the ledger for duplicate C-#### ids",
+		Long: `Scans cycles/<dir>/*.md for two or more notes sharing a leading C-####
+token (the post-pull/rebase backstop). Directory names are containers and are
+never counted, so the canonical cycles/C-0007/C-0007.md is one cycle.
+
+Exits 0 with "cycle ids ok (N cycles)" on a clean vault, or state_conflict (7)
+naming every file when an id is duplicated. Read-only; offline; never pushes.
+--json emits {ok, duplicates:[{id, paths}]}.
+
+Exit codes: 0 ok · 2 usage · 7 state_conflict · 10 io_error
+
+Example:
+  orbit cycles cycle validate --json`,
+		Args:         usageArgs(cobra.NoArgs),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openCyclesVault()
+			if err != nil {
+				return err
+			}
+			dups, err := s.CycleIDDuplicates()
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if flagJSON {
+				if dups == nil {
+					dups = []cycles.CycleIDConflict{}
+				}
+				if err := writeJSON(out, cycleValidateReport{OK: len(dups) == 0, Duplicates: dups}); err != nil {
+					return err
+				}
+				if len(dups) > 0 {
+					return cycles.DuplicateCycleIDError(dups[0])
+				}
+				return nil
+			}
+			if len(dups) > 0 {
+				return cycles.DuplicateCycleIDError(dups[0])
+			}
+			rows, err := s.ListCycles()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "cycle ids ok (%d cycles)\n", len(rows))
+			return nil
+		},
+	}
+	return cmd
+}
+
+// cycleReconcileReport is the `cycle reconcile --json` payload.
+type cycleReconcileReport struct {
+	Renumbered []cycles.Renumber `json:"renumbered"`
+}
+
+func newCyclesCycleReconcileCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Renumber duplicate cycle notes to the next free id",
+		Long: `Resolves duplicate leading C-#### ids (see ` + "`cycle validate`" + `): for each
+duplicate group the later-minted note — the greater (created:, created_by:)
+tuple — loses and is renumbered to the next free id. Its folder and note move
+to the deterministic cycles/C-<new>/C-<new>.md path, its id: is rewritten, and
+one history line "C-#### → C-<new> (duplicate reconciled)" is appended. CURRENT
+is left untouched.
+
+Exits 0 reporting each renumber, or "no duplicates". Offline; never pushes.
+--json emits {renumbered:[{from, to, path}]}.
+
+Exit codes: 0 ok · 2 usage · 6 preflight_failed · 7 state_conflict · 10 io_error
+
+Example:
+  orbit cycles cycle reconcile --json`,
+		Args:         usageArgs(cobra.NoArgs),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openCyclesVault()
+			if err != nil {
+				return err
+			}
+			renumbered, err := s.ReconcileCycleIDs()
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if flagJSON {
+				if renumbered == nil {
+					renumbered = []cycles.Renumber{}
+				}
+				return writeJSON(out, cycleReconcileReport{Renumbered: renumbered})
+			}
+			if len(renumbered) == 0 {
+				fmt.Fprintln(out, "no duplicates")
+				return nil
+			}
+			for _, r := range renumbered {
+				fmt.Fprintf(out, "renumbered %s → %s (%s)\n", r.From, r.To, r.Path)
+			}
+			return nil
 		},
 	}
 	return cmd

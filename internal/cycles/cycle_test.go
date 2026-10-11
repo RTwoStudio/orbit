@@ -31,6 +31,7 @@ project:
 repo:
 provider:
 milestone: {}
+history: []
 created: {{DATE}}
 registry-version: {{REGISTRY_VERSION}}
 ---
@@ -66,7 +67,7 @@ func mustWork(t *testing.T, s *Store, title, scope string, bet bool) *WorkItem {
 		t.Fatalf("ShapeWork(%s): %v", it.ID, err)
 	}
 	if bet {
-		if _, err := s.BetWork(it.ID); err != nil {
+		if _, err := s.BetWork(it.ID, []string{testOwnerHandle}); err != nil {
 			t.Fatalf("BetWork(%s): %v", it.ID, err)
 		}
 	}
@@ -409,7 +410,7 @@ func TestBetsRefreshOnWorkVerbs(t *testing.T) {
 	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); strings.TrimSpace(bets) != "" {
 		t.Errorf("bets before bet = %q, want empty", bets)
 	}
-	if _, err := s.BetWork(it.ID); err != nil {
+	if _, err := s.BetWork(it.ID, []string{testOwnerHandle}); err != nil {
 		t.Fatal(err)
 	}
 	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); !strings.Contains(bets, "- W-0001-arash-jafarpour — Cancellation flow (Bet)") {
@@ -424,7 +425,7 @@ func TestBetsRefreshOnWorkVerbs(t *testing.T) {
 	if _, err := s.UnshelveWork(it.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BetWork(it.ID); err != nil {
+	if _, err := s.BetWork(it.ID, []string{testOwnerHandle}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DeliverWork(it.ID); err != nil {
@@ -448,7 +449,7 @@ func TestWorkVerbWithoutCycleNote(t *testing.T) {
 	if _, err := s.ShapeWork(it.ID, "small"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BetWork(it.ID); err != nil {
+	if _, err := s.BetWork(it.ID, []string{testOwnerHandle}); err != nil {
 		t.Fatalf("BetWork without a cycle note: %v", err)
 	}
 }
@@ -521,7 +522,7 @@ func TestCycleJSONShape(t *testing.T) {
 		`"release"`, `"status"`, `"start"`, `"end"`,
 		`"project":"/home/x/proj"`, `"repo"`, `"provider"`,
 		`"milestone":{"RTwoStudio/orbit":4}`,
-		`"created"`, `"registry_version"`, `"path"`, `"bets":[]`,
+		`"created"`, `"registry_version"`, `"path"`, `"history":[]`, `"bets":[]`,
 	} {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("marshalled Cycle missing %s: %s", key, data)
@@ -685,5 +686,250 @@ func TestCycleNotePathIsDeterministic(t *testing.T) {
 	}
 	if got := filepath.Base(want); got != "C-0001.md" {
 		t.Errorf("filename = %q, want C-0001.md (no slug)", got)
+	}
+}
+
+// writeCycleNote writes a minimal cycle note at cycles/<dir>/<name> carrying
+// the given id and provenance, so the reconcile loser rule is observable.
+func writeCycleNote(t *testing.T, s *Store, dir, name, id, created, createdBy string) string {
+	t.Helper()
+	path := filepath.Join(s.LedgerDir(), dir, name)
+	content := "---\n" +
+		"id: " + id + "\n" +
+		"created_by: " + createdBy + "\n" +
+		"status: Open\n" +
+		"history: []\n" +
+		"created: " + created + "\n" +
+		"---\n\n# " + id + "\n"
+	if err := fsutil.AtomicWrite(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// errMessage returns a coded error's message.
+func errMessage(t *testing.T, err error) string {
+	t.Helper()
+	var e *exit.Error
+	if !errors.As(err, &e) {
+		t.Fatalf("error %v is not *exit.Error", err)
+	}
+	return e.Message
+}
+
+// TestNewCycleHistoryField: a fresh cycle carries an empty, non-nil history and
+// the note stub renders `history: []`.
+func TestNewCycleHistoryField(t *testing.T) {
+	s := setupVault(t)
+	cy, err := s.NewCycle("History", "0.1.0", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cy.History == nil || len(cy.History) != 0 {
+		t.Errorf("history = %#v, want empty non-nil", cy.History)
+	}
+	if note := cycleNote(t, s, cy.ID); !strings.Contains(note, "history: []") {
+		t.Errorf("cycle note missing history: []:\n%s", note)
+	}
+}
+
+// TestNewCycleRefusesDuplicate: the post-pull duplicate-C-#### preflight runs
+// before allocation and refuses with state_conflict (7) + a git pull --rebase
+// hint, naming both files.
+func TestNewCycleRefusesDuplicate(t *testing.T) {
+	s := setupVault(t)
+	a := writeCycleNote(t, s, "C-0001", "C-0001.md", "C-0001", "2026-01-01T00:00:00Z", testOwnerHandle)
+	b := writeCycleNote(t, s, "C-0001-copy", "C-0001.md", "C-0001", "2026-01-02T00:00:00Z", testOwnerHandle)
+
+	_, err := s.NewCycle("Post-pull", "0.1.0", "", "")
+	if codeOf(t, err) != exit.StateConflict {
+		t.Fatalf("duplicate NewCycle code = %v, want state_conflict", codeOf(t, err))
+	}
+	var e *exit.Error
+	if !errors.As(err, &e) || !strings.Contains(strings.Join(e.Hints, " "), "git pull --rebase") {
+		t.Errorf("duplicate NewCycle hint should mention git pull --rebase: %v", err)
+	}
+	msg := errMessage(t, err)
+	if !strings.Contains(msg, a) || !strings.Contains(msg, b) {
+		t.Errorf("message %q must name both %q and %q", msg, a, b)
+	}
+}
+
+// TestNewCycleRefusesExistingID: the refuse-existing guard fires when the
+// computed id already exists on disk but NextCycleID's directory scan did not
+// see it (here simulated with a symlinked cycle folder, as a concurrent
+// writer's checkout could leave). A clean vault still opens the cycle.
+func TestNewCycleRefusesExistingID(t *testing.T) {
+	s := setupVault(t)
+	target := t.TempDir()
+	if err := os.Symlink(target, s.CycleDir("C-0001")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	_, err := s.NewCycle("Race", "0.1.0", "", "")
+	if codeOf(t, err) != exit.StateConflict {
+		t.Fatalf("existing-id NewCycle code = %v, want state_conflict", codeOf(t, err))
+	}
+	var e *exit.Error
+	if !errors.As(err, &e) || !strings.Contains(strings.Join(e.Hints, " "), "git pull --rebase") {
+		t.Errorf("existing-id hint should mention git pull --rebase: %v", err)
+	}
+}
+
+// TestReconcileCycleIDsNoDuplicates: a clean vault renumbers nothing.
+func TestReconcileCycleIDsNoDuplicates(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Solo", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.ReconcileCycleIDs()
+	if err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if out != nil {
+		t.Errorf("renumbers = %+v, want nil", out)
+	}
+}
+
+// TestReconcileCycleIDsByCreated: the later `created:` note loses and is
+// renumbered — folder + note move to the deterministic path, id: rewritten,
+// one history line appended, and a re-scan is clean.
+func TestReconcileCycleIDsByCreated(t *testing.T) {
+	s := setupVault(t)
+	early := writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	late := writeCycleNote(t, s, "C-0007-copy", "C-0007.md", "C-0007", "2026-01-02T00:00:00Z", testOwnerHandle)
+
+	out, err := s.ReconcileCycleIDs()
+	if err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if len(out) != 1 || out[0].From != "C-0007" || out[0].To != "C-0008" {
+		t.Fatalf("renumbers = %+v, want one C-0007 → C-0008", out)
+	}
+	wantPath := filepath.Join(s.LedgerDir(), "C-0008", "C-0008.md")
+	if out[0].Path != wantPath {
+		t.Errorf("renumber path = %q, want %q", out[0].Path, wantPath)
+	}
+	if !fsutil.Exists(wantPath) {
+		t.Fatalf("renumbered note missing at %s", wantPath)
+	}
+	if !fsutil.Exists(early) || fsutil.Exists(late) {
+		t.Errorf("winner/loser note placement wrong: early=%v late=%v", fsutil.Exists(early), fsutil.Exists(late))
+	}
+	if fsutil.Exists(filepath.Dir(late)) {
+		t.Errorf("loser dir %s still present", filepath.Dir(late))
+	}
+	got := cycleNote(t, s, "C-0008")
+	if !strings.Contains(got, "id: C-0008") {
+		t.Errorf("renumbered note id not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, "C-0007 → C-0008 (duplicate reconciled)") {
+		t.Errorf("renumbered note missing history line:\n%s", got)
+	}
+	if err := s.CheckCycleIDs(); err != nil {
+		t.Errorf("post-reconcile CheckCycleIDs: %v", err)
+	}
+}
+
+// TestReconcileCycleIDsCreatedByTiebreak: equal `created:` tiebreaks on the
+// greater `created_by:` handle, which loses.
+func TestReconcileCycleIDsCreatedByTiebreak(t *testing.T) {
+	s := setupVault(t)
+	early := writeCycleNote(t, s, "C-0005", "C-0005.md", "C-0005", "2026-01-01T00:00:00Z", "arash-jafarpour")
+	late := writeCycleNote(t, s, "C-0005-copy", "C-0005.md", "C-0005", "2026-01-01T00:00:00Z", "seyed-mahdi-rostami")
+
+	out, err := s.ReconcileCycleIDs()
+	if err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if len(out) != 1 || out[0].To != "C-0006" {
+		t.Fatalf("renumbers = %+v, want one → C-0006", out)
+	}
+	if !fsutil.Exists(early) || fsutil.Exists(late) {
+		t.Errorf("tiebreak winner/loser wrong: early=%v late=%v", fsutil.Exists(early), fsutil.Exists(late))
+	}
+}
+
+// TestReconcileCycleIDsSameDirKeepsWinner: when the winner and loser share a
+// folder, only the loser moves — the winner's folder is left untouched.
+func TestReconcileCycleIDsSameDirKeepsWinner(t *testing.T) {
+	s := setupVault(t)
+	winner := writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	loser := writeCycleNote(t, s, "C-0007", "C-0007 - copy.md", "C-0007", "2026-01-02T00:00:00Z", testOwnerHandle)
+
+	out, err := s.ReconcileCycleIDs()
+	if err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if len(out) != 1 || out[0].To != "C-0008" {
+		t.Fatalf("renumbers = %+v, want one → C-0008", out)
+	}
+	if !fsutil.Exists(winner) {
+		t.Errorf("winner %s was moved with the loser's folder", winner)
+	}
+	if fsutil.Exists(loser) {
+		t.Errorf("loser %s still present", loser)
+	}
+	if !fsutil.Exists(filepath.Join(s.CycleDir("C-0008"), "C-0008.md")) {
+		t.Errorf("loser not renumbered to the deterministic path")
+	}
+	if err := s.CheckCycleIDs(); err != nil {
+		t.Errorf("post-reconcile CheckCycleIDs: %v", err)
+	}
+}
+
+// TestReconcileCycleIDsMovesWorkNotes: committed work notes travel with the
+// renamed cycle folder.
+func TestReconcileCycleIDsMovesWorkNotes(t *testing.T) {
+	s := setupVault(t)
+	writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	writeCycleNote(t, s, "C-0007-copy", "C-0007.md", "C-0007", "2026-01-02T00:00:00Z", testOwnerHandle)
+	betName := "W-0001-" + testOwnerHandle + " - bet.md"
+	writeRaw(t, filepath.Join(s.CycleDir("C-0007-copy"), betName))
+
+	if _, err := s.ReconcileCycleIDs(); err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if !fsutil.Exists(filepath.Join(s.CycleDir("C-0008"), betName)) {
+		t.Errorf("committed work note did not move with the cycle folder")
+	}
+}
+
+// TestReconcileCycleIDsCurrentUntouched: reconcile acts on the ledger only and
+// never rewrites CURRENT.
+func TestReconcileCycleIDsCurrentUntouched(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Open", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	writeCycleNote(t, s, "C-0001-copy", "C-0001.md", "C-0001", "2099-01-01T00:00:00Z", testOwnerHandle)
+
+	if _, err := s.ReconcileCycleIDs(); err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if got := currentContents(t, s); got != "C-0001" {
+		t.Errorf("CURRENT = %q, want C-0001 (reconcile must not touch it)", got)
+	}
+	if !fsutil.Exists(filepath.Join(s.CycleDir("C-0002"), "C-0002.md")) {
+		t.Errorf("duplicate was not renumbered to C-0002")
+	}
+}
+
+// TestReconcileCycleIDsMultipleLosers: a three-way duplicate converges with one
+// renumber per losing note.
+func TestReconcileCycleIDsMultipleLosers(t *testing.T) {
+	s := setupVault(t)
+	writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	writeCycleNote(t, s, "C-0007-b", "C-0007.md", "C-0007", "2026-01-02T00:00:00Z", testOwnerHandle)
+	writeCycleNote(t, s, "C-0007-c", "C-0007.md", "C-0007", "2026-01-03T00:00:00Z", testOwnerHandle)
+
+	out, err := s.ReconcileCycleIDs()
+	if err != nil {
+		t.Fatalf("ReconcileCycleIDs: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("renumbers = %+v, want 2", out)
+	}
+	if err := s.CheckCycleIDs(); err != nil {
+		t.Errorf("post-reconcile CheckCycleIDs: %v", err)
 	}
 }

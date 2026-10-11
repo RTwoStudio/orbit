@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -190,4 +191,105 @@ func (s *Store) NextCycleID() (string, error) {
 		}
 	}
 	return fmt.Sprintf("C-%04d", max+1), nil
+}
+
+// CycleIDConflict names a duplicate leading cycle id and every note path that
+// carries it. `paths` is sorted; a group always holds ≥2 entries.
+type CycleIDConflict struct {
+	ID    string   `json:"id"`
+	Paths []string `json:"paths"`
+}
+
+// cycleNotePaths returns every cycle-note path under a cycles/<dir>/ folder
+// whose leading filename token matches the C-#### grammar. Directory names are
+// containers and are never counted, so the canonical one-note layout
+// (cycles/C-0007/C-0007.md) is a single cycle, not a self-duplicate. A missing
+// ledger is an empty result; an unreadable folder is skipped.
+func (s *Store) cycleNotePaths() ([]string, error) {
+	entries, err := os.ReadDir(s.LedgerDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, exit.Wrap(exit.IOError, err, "cannot scan "+s.LedgerDir())
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(s.LedgerDir(), e.Name())
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			if !cycleIDRe.MatchString(cycleIDFromFilename(f.Name())) {
+				continue
+			}
+			out = append(out, filepath.Join(dir, f.Name()))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// CycleIDDuplicates scans the ledger for duplicate leading C-#### ids and
+// returns one group per duplicated token, ordered by numeric id (each group's
+// paths sorted). A clean vault — or a missing ledger — yields nil. It is the
+// post-pull/rebase backstop (design §5): a "keep both" merge that lands two
+// notes with one id is reported here rather than silently losing a cycle.
+func (s *Store) CycleIDDuplicates() ([]CycleIDConflict, error) {
+	paths, err := s.cycleNotePaths()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string][]string)
+	for _, p := range paths {
+		tok := cycleIDFromFilename(filepath.Base(p))
+		byID[tok] = append(byID[tok], p)
+	}
+	var out []CycleIDConflict
+	for id, ps := range byID {
+		if len(ps) < 2 {
+			continue
+		}
+		sort.Strings(ps)
+		out = append(out, CycleIDConflict{ID: id, Paths: ps})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := cycleIDNum(out[i].ID)
+		nj, _ := cycleIDNum(out[j].ID)
+		if ni != nj {
+			return ni < nj
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+// CheckCycleIDs is the loud post-pull/rebase preflight: it returns a
+// state_conflict (7) naming both files when two or more cycle notes share a
+// leading C-#### token, or nil on a clean vault. Reads report duplicates;
+// `cycle reconcile` is what resolves them.
+func (s *Store) CheckCycleIDs() error {
+	dups, err := s.CycleIDDuplicates()
+	if err != nil {
+		return err
+	}
+	if len(dups) == 0 {
+		return nil
+	}
+	return DuplicateCycleIDError(dups[0])
+}
+
+// DuplicateCycleIDError renders the state_conflict (7) for a duplicate group,
+// naming every file that carries the id and hinting the pull/reconcile loop.
+func DuplicateCycleIDError(c CycleIDConflict) error {
+	return exit.New(exit.StateConflict,
+		fmt.Sprintf("duplicate cycle id %s in %d notes: %s", c.ID, len(c.Paths), strings.Join(c.Paths, ", ")),
+		"run: git pull --rebase, then orbit cycles cycle reconcile")
 }

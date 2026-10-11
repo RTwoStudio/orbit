@@ -27,6 +27,7 @@ type WorkItem struct {
 	Status          string   `json:"status"`
 	Appetite        string   `json:"appetite"`
 	Cycle           string   `json:"cycle"`
+	Assignees       []string `json:"assignees"`
 	Project         string   `json:"project"`
 	Provider        string   `json:"provider"`
 	Repo            string   `json:"repo"`
@@ -146,10 +147,14 @@ func (s *Store) ShapeWork(id, appetite string) (*WorkItem, error) {
 	return workItemFromDoc(d), nil
 }
 
-// BetWork commits a Pitched item to the open cycle: it requires a valid
-// CURRENT pointer, moves the file into cycles/C-####/, and stamps status +
-// cycle.
-func (s *Store) BetWork(id string) (*WorkItem, error) {
+// BetWork commits a Pitched item to the open cycle: it validates the assignee
+// set against the roster, requires a valid CURRENT pointer, moves the file into
+// cycles/C-####/, and stamps status + cycle + assignees.
+//
+// At least one roster handle is required (an empty set is a preflight_failed 6),
+// and an unknown or empty handle is a preflight_failed (6); duplicates are
+// dropped, preserving first-seen order.
+func (s *Store) BetWork(id string, assignees []string) (*WorkItem, error) {
 	d, err := s.findAndParse(id)
 	if err != nil {
 		return nil, err
@@ -162,11 +167,16 @@ func (s *Store) BetWork(id string) (*WorkItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	list, err := s.validateAssignees(assignees)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.moveWorkTo(d, s.CycleDir(cycle)); err != nil {
 		return nil, err
 	}
 	d.Set("status", WorkBet.FileValue())
 	d.Set("cycle", cycle)
+	d.SetStringList("assignees", list)
 	d.AppendToList("history", historyLine(from, WorkBet, "cycle: "+cycle))
 	if err := d.Save(); err != nil {
 		return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+d.Path)
@@ -303,6 +313,37 @@ func (s *Store) ShowWork(id string) (*WorkItem, error) {
 	return workItemFromDoc(d), nil
 }
 
+// SetAssignees replaces a work item's `assignees:` list with the given handles.
+// Every handle is trimmed and validated against the roster (an empty or unknown
+// handle is a preflight_failed 6), duplicates are dropped preserving first-seen
+// order, and at least one handle is required (exit 6) — the same rules as
+// SetSubscribers, but non-empty enforced. The validated list is written back and
+// the refreshed read shape is returned. Library-level only: `BetWork` and T5's
+// agent are the callers; there is no separate CLI verb.
+func (s *Store) SetAssignees(id string, handles []string) (*WorkItem, error) {
+	d, err := s.findAndParse(id)
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.validateAssignees(handles)
+	if err != nil {
+		return nil, err
+	}
+	d.SetStringList("assignees", list)
+	if err := d.Save(); err != nil {
+		return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+d.Path)
+	}
+	logx.Info("work assignees set id=%s n=%d", d.Get("id"), len(list))
+	return workItemFromDoc(d), nil
+}
+
+// validateAssignees trims and roster-validates an assignee list, deduping while
+// preserving first-seen order and requiring at least one handle. It shares one
+// helper with the cycle subscriber validator so the two cannot drift.
+func (s *Store) validateAssignees(handles []string) ([]string, error) {
+	return s.validateRosterHandles("assignee", handles, true)
+}
+
 // findAndParse resolves a work id then parses its note.
 func (s *Store) findAndParse(id string) (*doc.Doc, error) {
 	path, err := s.FindWork(id)
@@ -362,6 +403,10 @@ func workItemFromDoc(d *doc.Doc) *WorkItem {
 	if history == nil {
 		history = []string{}
 	}
+	assignees := d.GetStringList("assignees")
+	if assignees == nil {
+		assignees = []string{}
+	}
 	return &WorkItem{
 		ID:              d.Get("id"),
 		Title:           d.Get("title"),
@@ -371,6 +416,7 @@ func workItemFromDoc(d *doc.Doc) *WorkItem {
 		Status:          canonicalStatus(d.Get("status")),
 		Appetite:        d.Get("appetite"),
 		Cycle:           d.Get("cycle"),
+		Assignees:       assignees,
 		Project:         d.Get("project"),
 		Provider:        d.Get("provider"),
 		Repo:            d.Get("repo"),

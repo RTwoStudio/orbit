@@ -48,7 +48,17 @@ type Cycle struct {
 	Created         string         `json:"created"`
 	RegistryVersion string         `json:"registry_version"`
 	Path            string         `json:"path"`
+	History         []string       `json:"history"`
 	Bets            []WorkItem     `json:"bets"`
+}
+
+// Renumber records one reconcile rename: a duplicate cycle note that lost and
+// was renumbered from id `From` to the free id `To`, together with its new
+// canonical note path.
+type Renumber struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Path string `json:"path"`
 }
 
 // NewCycle creates the next cycle, renders its note from the cached
@@ -56,9 +66,11 @@ type Cycle struct {
 //
 // Preflight: a non-empty goal, a strict MAJOR.MINOR.PATCH release, and an
 // initialized vault. At most one cycle may be open at a time, so an existing
-// open cycle is a state_conflict (7). start defaults to UTC today; end
-// defaults to start + DefaultCycleWindow. Both are bare YYYY-MM-DD dates and
-// end must not precede start (preflight_failed 6).
+// open cycle is a state_conflict (7). The id is allocated only after the
+// post-pull duplicate-C-#### scan passes; a duplicate or an already-existing
+// id is a state_conflict (7) with a `git pull --rebase` hint. start defaults to
+// UTC today; end defaults to start + DefaultCycleWindow. Both are bare
+// YYYY-MM-DD dates and end must not precede start (preflight_failed 6).
 func (s *Store) NewCycle(goal, release, start, end string) (*Cycle, error) {
 	goal = strings.TrimSpace(goal)
 	release = strings.TrimSpace(release)
@@ -78,6 +90,12 @@ func (s *Store) NewCycle(goal, release, start, end string) (*Cycle, error) {
 		return nil, exit.New(exit.StateConflict,
 			"a cycle is already open",
 			"close it first: orbit cycles cycle close")
+	}
+
+	// Post-pull duplicate-id preflight (design §5): a stale vault carrying two
+	// notes that share a C-#### fails loudly here, before any id is allocated.
+	if err := s.CheckCycleIDs(); err != nil {
+		return nil, err
 	}
 
 	// Resolve the creator's handle from the vault clone's git identity + roster
@@ -109,6 +127,15 @@ func (s *Store) NewCycle(goal, release, start, end string) (*Cycle, error) {
 	id, err := s.NextCycleID()
 	if err != nil {
 		return nil, err
+	}
+	// Refuse-existing (mirrors work new's preflight): the computed id must not
+	// already be on disk. NextCycleID already accounts for canonical dirs and
+	// notes, so this guards a stale lead or a concurrent writer — a
+	// pull-and-retry state_conflict (7), never a silent overwrite.
+	if fsutil.IsDir(s.CycleDir(id)) || fsutil.Exists(filepath.Join(s.CycleDir(id), id+".md")) {
+		return nil, exit.New(exit.StateConflict,
+			fmt.Sprintf("cycle %s already exists — pull and retry", id),
+			"run: git pull --rebase, then retry")
 	}
 	rendered, err := scaffold.Render(stub, map[string]string{
 		"RELEASE":          release,
@@ -205,6 +232,154 @@ func (s *Store) CloseCycle() (*Cycle, error) {
 	cy := s.cycleFromDoc(d, id)
 	cy.Bets = []WorkItem{}
 	return cy, nil
+}
+
+// ReconcileCycleIDs resolves duplicate leading C-#### ids, one losing note at a
+// time (design §5). For each duplicate group the later-minted note loses — the
+// greater (created:, created_by:) tuple, with an empty or missing value sorting
+// lowest, and the lexicographically greater path breaking an exact tie — and is
+// renumbered to NextCycleID(): its cycle folder is renamed to cycles/C-<new>/
+// (committed work notes move with it) and its note to C-<new>.md, the note's
+// `id:` is rewritten, and exactly one history line
+// "C-#### → C-<new> (duplicate reconciled)" is appended. CURRENT is left
+// untouched — reads report, reconcile acts. Returns the renumbers performed; a
+// clean vault yields nil.
+func (s *Store) ReconcileCycleIDs() ([]Renumber, error) {
+	var out []Renumber
+	for {
+		dups, err := s.CycleIDDuplicates()
+		if err != nil {
+			return nil, err
+		}
+		if len(dups) == 0 {
+			return out, nil
+		}
+		// Each pass renumbers one note to a strictly greater id, so the loop
+		// always converges; the cap is a belt-and-suspenders guard.
+		if len(out) >= 1000 {
+			return nil, exit.New(exit.General, "cycle reconcile did not converge")
+		}
+		group := dups[0]
+		loser := s.pickReconcileLoser(group.Paths)
+		newID, err := s.NextCycleID()
+		if err != nil {
+			return nil, err
+		}
+		path, err := renumberCycleNote(s, loser, group.ID, newID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Renumber{From: group.ID, To: newID, Path: path})
+	}
+}
+
+// pickReconcileLoser returns the path of the duplicate note that must lose the
+// id: the greatest (created:, created_by:) tuple on a total order (empty or
+// missing sorts lowest), with the path breaking an exact tie so the choice is
+// deterministic across clones. An unparseable note is treated as empty. It
+// never consults filesystem mtime.
+func (s *Store) pickReconcileLoser(paths []string) string {
+	type candidate struct {
+		path      string
+		created   time.Time
+		createdBy string
+	}
+	cands := make([]candidate, 0, len(paths))
+	for _, p := range paths {
+		c := candidate{path: p}
+		if d, err := doc.ParseDoc(p); err == nil {
+			c.createdBy = d.Get("created_by")
+			if t, err := time.Parse(time.RFC3339, d.Get("created")); err == nil {
+				c.created = t
+			}
+		}
+		cands = append(cands, c)
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		a, b := cands[i], cands[j]
+		if !a.created.Equal(b.created) {
+			return a.created.Before(b.created)
+		}
+		if a.createdBy != b.createdBy {
+			return a.createdBy < b.createdBy
+		}
+		return a.path < b.path
+	})
+	return cands[len(cands)-1].path
+}
+
+// renumberCycleNote moves one losing cycle note from oldID to newID at the
+// deterministic cycles/C-<new>/C-<new>.md path: the whole folder is renamed
+// when it holds no other cycle note (so committed work notes travel with it),
+// otherwise just the note moves and the winner is left in place. The note's
+// id: is rewritten and exactly one history line appended.
+func renumberCycleNote(s *Store, notePath, oldID, newID string) (string, error) {
+	oldDir := filepath.Dir(notePath)
+	newDir := s.CycleDir(newID)
+	onlyNote, err := dirHoldsOnlyCycleNote(oldDir, notePath)
+	if err != nil {
+		return "", err
+	}
+	if onlyNote {
+		if err := os.Rename(oldDir, newDir); err != nil {
+			return "", exit.Wrap(exit.IOError, err, "cannot rename "+oldDir)
+		}
+	} else {
+		if err := fsutil.EnsureDir(newDir); err != nil {
+			return "", exit.Wrap(exit.IOError, err, "cannot create "+newDir)
+		}
+		if err := os.Rename(notePath, filepath.Join(newDir, filepath.Base(notePath))); err != nil {
+			return "", exit.Wrap(exit.IOError, err, "cannot move "+notePath)
+		}
+	}
+	moved := filepath.Join(newDir, filepath.Base(notePath))
+	newNotePath := filepath.Join(newDir, newID+".md")
+	if moved != newNotePath && fsutil.Exists(moved) {
+		if err := os.Rename(moved, newNotePath); err != nil {
+			return "", exit.Wrap(exit.IOError, err, "cannot rename cycle note "+moved)
+		}
+	}
+	d, err := doc.ParseDoc(newNotePath)
+	if err != nil {
+		return "", exit.Wrap(exit.PreflightFailed, err, "cannot parse duplicate cycle note "+newNotePath)
+	}
+	d.Set("id", newID)
+	d.AppendToList("history", reconcileHistoryLine(oldID, newID))
+	if err := d.Save(); err != nil {
+		return "", exit.Wrap(exit.IOError, err, "cannot rewrite "+newNotePath)
+	}
+	logx.Info("cycle reconciled %s → %s", oldID, newID)
+	return newNotePath, nil
+}
+
+// dirHoldsOnlyCycleNote reports whether dir holds no cycle note other than
+// notePath. Work notes (W-*.md) do not count, so a cycle folder that carries
+// committed work still renames whole.
+func dirHoldsOnlyCycleNote(dir, notePath string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, exit.Wrap(exit.IOError, err, "cannot read "+dir)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if filepath.Join(dir, e.Name()) == notePath {
+			continue
+		}
+		if cycleIDRe.MatchString(cycleIDFromFilename(e.Name())) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// reconcileHistoryLine formats the single history entry a reconcile appends:
+//
+//	2026-10-11T15:04:00Z  C-0007 → C-0008 (duplicate reconciled)
+func reconcileHistoryLine(from, to string) string {
+	return fmt.Sprintf("%s  %s → %s (duplicate reconciled)",
+		time.Now().UTC().Format(time.RFC3339), from, to)
 }
 
 // ListCycles returns every cycle's metadata (no Bets), sorted by numeric id.
@@ -315,33 +490,11 @@ func (s *Store) AddSubscriber(id, handle string) (*Cycle, error) {
 
 // validateHandles trims and roster-validates a subscriber list, deduping while
 // preserving first-seen order. An empty or unknown handle is a preflight_failed
-// (6) naming the roster.
+// (6) naming the roster. An empty list is allowed (subscribers may be cleared);
+// it delegates to the shared validateRosterHandles so subscribers and assignees
+// cannot drift.
 func (s *Store) validateHandles(handles []string) ([]string, error) {
-	r, err := s.LoadRoster()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(handles))
-	seen := make(map[string]bool, len(handles))
-	for _, h := range handles {
-		h = strings.TrimSpace(h)
-		if h == "" {
-			return nil, exit.New(exit.PreflightFailed,
-				"subscriber handle must not be empty",
-				"pass a roster handle, e.g. <handle>")
-		}
-		if _, ok := r.Lookup(h); !ok {
-			return nil, exit.New(exit.PreflightFailed,
-				fmt.Sprintf("unknown subscriber %q — not in the developer roster", h),
-				"add the handle to "+s.RosterPath()+" first")
-		}
-		if seen[h] {
-			continue
-		}
-		seen[h] = true
-		out = append(out, h)
-	}
-	return out, nil
+	return s.validateRosterHandles("subscriber", handles, false)
 }
 
 // cycleWorkFiles returns every work-note path (W-*.md) inside a cycle folder.
@@ -426,6 +579,10 @@ func (s *Store) cycleFromDoc(d *doc.Doc, id string) *Cycle {
 	if subscribers == nil {
 		subscribers = []string{}
 	}
+	history := d.GetStringList("history")
+	if history == nil {
+		history = []string{}
+	}
 	return &Cycle{
 		ID:              d.Get("id"),
 		Goal:            d.Get("goal"),
@@ -442,6 +599,7 @@ func (s *Store) cycleFromDoc(d *doc.Doc, id string) *Cycle {
 		Created:         d.Get("created"),
 		RegistryVersion: d.Get("registry-version"),
 		Path:            d.Path,
+		History:         history,
 	}
 }
 

@@ -84,7 +84,7 @@ func TestCyclesWorkSyncNoProject(t *testing.T) {
 	if _, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Ship the beta", "--release", "0.3.0", "--json"); err != nil {
 		t.Fatalf("cycle new: %v", err)
 	}
-	if _, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--json"); err != nil {
+	if _, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--assignee", cmdOwnerHandle, "--json"); err != nil {
 		t.Fatalf("work bet: %v", err)
 	}
 

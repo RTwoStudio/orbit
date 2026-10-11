@@ -59,6 +59,8 @@ func (f *fakeClient) CreateMilestone(_ context.Context, title, due string) (forg
 
 func (f *fakeClient) AssignIssue(context.Context, int, int) error { return nil }
 
+func (f *fakeClient) SetIssueAssignees(context.Context, int, []string) error { return nil }
+
 // forgeHarness installs fake resolveRemote/newForgeClient seams for a test.
 type forgeHarness struct {
 	resolve    map[string]forge.Remote // project dir → remote
@@ -118,8 +120,15 @@ func glRemote(owner, repo string) forge.Remote {
 }
 
 // betWithProject creates, shapes, sets an optional project:, and bets a work
-// item into the current cycle.
+// item into the current cycle, assigned to the test owner.
 func betWithProject(t *testing.T, s *Store, title, scope, project string) *WorkItem {
+	t.Helper()
+	return betWithAssignees(t, s, title, scope, project, []string{testOwnerHandle})
+}
+
+// betWithAssignees is betWithProject with an explicit assignee list, for the
+// assignee-mapping tests.
+func betWithAssignees(t *testing.T, s *Store, title, scope, project string, assignees []string) *WorkItem {
 	t.Helper()
 	it, err := s.NewWork(title, scope)
 	if err != nil {
@@ -139,7 +148,7 @@ func betWithProject(t *testing.T, s *Store, title, scope, project string) *WorkI
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.BetWork(it.ID); err != nil {
+	if _, err := s.BetWork(it.ID, assignees); err != nil {
 		t.Fatalf("BetWork(%s): %v", it.ID, err)
 	}
 	return it

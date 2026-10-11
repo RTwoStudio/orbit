@@ -61,7 +61,7 @@ func (s *Store) ReadCurrent() (string, error) {
 		// a file that exists but cannot be parsed — is neither "gone" nor
 		// "Closed": stay loud and never clear.
 		if os.IsNotExist(err) {
-			return id, nil
+			return s.currentAfterDuplicateCheck(id)
 		}
 		return "", exit.New(exit.StateConflict,
 			fmt.Sprintf("CURRENT points at unparseable cycle %s: %v", id, err),
@@ -69,6 +69,17 @@ func (s *Store) ReadCurrent() (string, error) {
 	}
 	if cycleStatusFromFile(d.Get("status")) == CycleClosed {
 		return "", s.clearStaleCurrent(id, "was closed upstream")
+	}
+	return s.currentAfterDuplicateCheck(id)
+}
+
+// currentAfterDuplicateCheck runs the post-pull duplicate-C-#### preflight on a
+// valid, non-cleared CURRENT pointer and then returns the id. A stale vault
+// with two notes sharing one C-#### fails loudly on every CURRENT read (design
+// §5) rather than letting a work verb act on an ambiguous timeline.
+func (s *Store) currentAfterDuplicateCheck(id string) (string, error) {
+	if err := s.CheckCycleIDs(); err != nil {
+		return "", err
 	}
 	return id, nil
 }

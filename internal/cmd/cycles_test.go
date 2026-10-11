@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ scope: {{SCOPE}}
 status: Backlog
 appetite:
 cycle:
+assignees: []
 project:
 provider:
 repo:
@@ -70,6 +72,7 @@ project:
 repo:
 provider:
 milestone: {}
+history: []
 created: {{DATE}}
 registry-version: {{REGISTRY_VERSION}}
 ---
@@ -189,6 +192,27 @@ const cyclesCmdRoster = "arash-jafarpour:\n" +
 	"  email: arash@example.com\n" +
 	"  github: arashjf\n" +
 	"  gitlab: arashjf\n"
+
+// cmdRosterTwo is a two-entry roster for the assignee-flag tests; arash's
+// name/email still match the vault clone's git identity.
+const cmdRosterTwo = "arash-jafarpour:\n" +
+	"  name: Arash Jafarpour\n" +
+	"  email: arash@example.com\n" +
+	"  github: arashjf\n" +
+	"  gitlab: arashjf\n" +
+	"seyed-mahdi-rostami:\n" +
+	"  name: Seyed Mahdi Rostami\n" +
+	"  email: seyed@example.com\n" +
+	"  github: seyedmr\n" +
+	"  gitlab: seyedmr\n"
+
+// writeCmdRoster replaces the vault's roster file.
+func writeCmdRoster(t *testing.T, vault, content string) {
+	t.Helper()
+	if err := fsutil.AtomicWrite(cycles.Open(vault).RosterPath(), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // initVaultGit makes dir a git repo carrying the test developer's identity.
 // Tests skip when git is not installed.
@@ -383,6 +407,58 @@ func TestCyclesWorkLifecycle(t *testing.T) {
 	}
 }
 
+// TestCyclesWorkBetAssignees: `work bet --assignee` takes a comma-separated,
+// repeatable roster-handle list (deduped, first-seen order); an empty or unknown
+// set is preflight_failed (6).
+func TestCyclesWorkBetAssignees(t *testing.T) {
+	env := setupCyclesCmd(t)
+	writeCmdRoster(t, env.vault, cmdRosterTwo)
+	mustCyclesWork(t, env.cfgPath, "Assigned work", "app") // W-0001-arash-jafarpour Pitched
+	if _, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Ship the beta", "--release", "0.3.0"); err != nil {
+		t.Fatalf("cycle new: %v", err)
+	}
+
+	// An unknown handle is preflight_failed (6); the item stays Pitched.
+	_, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--assignee", "nobody")
+	wantCode(t, err, exit.PreflightFailed)
+
+	// No --assignee at all is preflight_failed (6).
+	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour")
+	wantCode(t, err, exit.PreflightFailed)
+
+	// Comma list + repeat → deduped, first-seen order.
+	out, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour",
+		"--assignee", "seyed-mahdi-rostami,arash-jafarpour", "--assignee", "seyed-mahdi-rostami", "--json")
+	if err != nil {
+		t.Fatalf("work bet --assignee: %v", err)
+	}
+	bet := decodeJSON[cycles.WorkItem](t, out)
+	want := []string{"seyed-mahdi-rostami", "arash-jafarpour"}
+	if !reflect.DeepEqual(bet.Assignees, want) {
+		t.Fatalf("bet assignees = %v, want %v", bet.Assignees, want)
+	}
+	if bet.Status != "Bet" {
+		t.Fatalf("bet status = %q, want Bet", bet.Status)
+	}
+}
+
+// TestCyclesWorkBetHuman: the human default prints "<id> → Bet", and a single
+// repeatable --assignee is enough.
+func TestCyclesWorkBetHuman(t *testing.T) {
+	env := setupCyclesCmd(t)
+	mustCyclesWork(t, env.cfgPath, "Human bet", "app")
+	if _, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Ship the beta", "--release", "0.3.0"); err != nil {
+		t.Fatalf("cycle new: %v", err)
+	}
+	out, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--assignee", cmdOwnerHandle)
+	if err != nil {
+		t.Fatalf("work bet: %v", err)
+	}
+	if !strings.Contains(out, "W-0001-arash-jafarpour → Bet") {
+		t.Errorf("human work bet output = %q", out)
+	}
+}
+
 func TestCyclesCycleAndStatus(t *testing.T) {
 	env := setupCyclesCmd(t)
 	mustCyclesWork(t, env.cfgPath, "Cancellation flow", "app")
@@ -402,13 +478,16 @@ func TestCyclesCycleAndStatus(t *testing.T) {
 		t.Errorf("cycle new subscribers = %#v, want empty non-nil", cy.Subscribers)
 	}
 
-	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--json")
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--assignee", "arash-jafarpour", "--json")
 	if err != nil {
 		t.Fatalf("work bet: %v", err)
 	}
 	bet := decodeJSON[cycles.WorkItem](t, out)
 	if bet.Status != "Bet" || bet.Cycle != "C-0001" {
 		t.Fatalf("bet item = %+v", bet)
+	}
+	if len(bet.Assignees) != 1 || bet.Assignees[0] != cmdOwnerHandle {
+		t.Fatalf("bet assignees = %v, want [%s]", bet.Assignees, cmdOwnerHandle)
 	}
 
 	// status --json exposes the typed board.
@@ -641,4 +720,85 @@ func TestCyclesVaultResolution(t *testing.T) {
 	}
 	_, _, err = runCycles(t, emptyCfg, "cycles", "status")
 	wantCode(t, err, exit.ConfigError)
+}
+
+// TestCyclesCycleValidateReconcile drives the post-pull backstop end to end: a
+// clean vault validates, a hand-placed duplicate is reported (human + --json),
+// reconcile renumbers the later note, and a re-scan is clean.
+func TestCyclesCycleValidateReconcile(t *testing.T) {
+	env := setupCyclesCmd(t)
+	if _, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Ship", "--release", "0.3.0"); err != nil {
+		t.Fatalf("cycle new: %v", err)
+	}
+
+	// Clean: validate exits 0 with the ok line.
+	out, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "validate")
+	if err != nil {
+		t.Fatalf("validate clean: %v", err)
+	}
+	if !strings.Contains(out, "cycle ids ok (1 cycles)") {
+		t.Errorf("validate clean output = %q", out)
+	}
+	// Clean reconcile: nothing to do.
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "reconcile")
+	if err != nil {
+		t.Fatalf("reconcile clean: %v", err)
+	}
+	if !strings.Contains(out, "no duplicates") {
+		t.Errorf("reconcile clean output = %q", out)
+	}
+
+	// Hand-place a duplicate under a renamed dir (a "keep both" merge), minted
+	// later than the real cycle so it must lose.
+	dupDir := filepath.Join(env.vault, "Cycles", "cycles", "C-0001-copy")
+	if err := fsutil.EnsureDir(dupDir); err != nil {
+		t.Fatal(err)
+	}
+	dupNote := "---\nid: C-0001\ncreated_by: " + cmdOwnerHandle +
+		"\nstatus: Open\nhistory: []\ncreated: 2099-01-01T00:00:00Z\n---\n\n# C-0001\n"
+	if err := fsutil.AtomicWrite(filepath.Join(dupDir, "C-0001.md"), []byte(dupNote), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// validate --json: ok:false + duplicates, exit 7.
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "validate", "--json")
+	wantCode(t, err, exit.StateConflict)
+	report := decodeJSON[struct {
+		OK         bool `json:"ok"`
+		Duplicates []struct {
+			ID    string   `json:"id"`
+			Paths []string `json:"paths"`
+		} `json:"duplicates"`
+	}](t, out)
+	if report.OK || len(report.Duplicates) != 1 || report.Duplicates[0].ID != "C-0001" || len(report.Duplicates[0].Paths) != 2 {
+		t.Fatalf("validate --json = %+v", report)
+	}
+
+	// reconcile --json renumbers the later note to C-0002.
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "reconcile", "--json")
+	if err != nil {
+		t.Fatalf("reconcile --json: %v", err)
+	}
+	rr := decodeJSON[struct {
+		Renumbered []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+			Path string `json:"path"`
+		} `json:"renumbered"`
+	}](t, out)
+	if len(rr.Renumbered) != 1 || rr.Renumbered[0].From != "C-0001" || rr.Renumbered[0].To != "C-0002" {
+		t.Fatalf("reconcile --json = %+v", rr)
+	}
+	if !fsutil.Exists(filepath.Join(env.vault, "Cycles", "cycles", "C-0002", "C-0002.md")) {
+		t.Errorf("renumbered note not at the deterministic path")
+	}
+
+	// A re-run of validate is clean.
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "validate")
+	if err != nil {
+		t.Fatalf("post-reconcile validate: %v", err)
+	}
+	if !strings.Contains(out, "cycle ids ok") {
+		t.Errorf("post-reconcile validate output = %q", out)
+	}
 }

@@ -2,6 +2,7 @@ package cycles
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/RTwoStudio/orbit/internal/exit"
@@ -217,5 +218,56 @@ func TestFindWorkDuplicateIsConflict(t *testing.T) {
 
 	if _, err := s.FindWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("duplicate composite code = %v, want state_conflict", codeOf(t, err))
+	}
+}
+
+// TestCheckCycleIDsClean: a missing ledger, the canonical one-note layout, and
+// a bare container directory are all clean (directory names are never counted).
+func TestCheckCycleIDsClean(t *testing.T) {
+	s := setupVault(t)
+	if err := s.CheckCycleIDs(); err != nil {
+		t.Fatalf("empty ledger CheckCycleIDs: %v", err)
+	}
+	writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	if err := fsutil.EnsureDir(s.CycleDir("C-0009")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckCycleIDs(); err != nil {
+		t.Fatalf("clean vault CheckCycleIDs: %v", err)
+	}
+}
+
+// TestCheckCycleIDsDuplicate: two notes sharing a leading C-#### token are a
+// state_conflict (7) naming both files; groups are ordered numerically.
+func TestCheckCycleIDsDuplicate(t *testing.T) {
+	s := setupVault(t)
+	a := writeCycleNote(t, s, "C-0007", "C-0007.md", "C-0007", "2026-01-01T00:00:00Z", testOwnerHandle)
+	b := writeCycleNote(t, s, "C-0007-copy", "C-0007.md", "C-0007", "2026-01-02T00:00:00Z", testOwnerHandle)
+
+	err := s.CheckCycleIDs()
+	if codeOf(t, err) != exit.StateConflict {
+		t.Fatalf("duplicate code = %v, want state_conflict", codeOf(t, err))
+	}
+	msg := errMessage(t, err)
+	if !strings.Contains(msg, a) || !strings.Contains(msg, b) {
+		t.Errorf("message %q must name both %q and %q", msg, a, b)
+	}
+
+	dups, err := s.CycleIDDuplicates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 1 || dups[0].ID != "C-0007" || len(dups[0].Paths) != 2 {
+		t.Fatalf("CycleIDDuplicates = %+v, want one C-0007 group of 2", dups)
+	}
+
+	writeCycleNote(t, s, "C-0003-a", "C-0003.md", "C-0003", "2026-01-01T00:00:00Z", testOwnerHandle)
+	writeCycleNote(t, s, "C-0003-b", "C-0003.md", "C-0003", "2026-01-01T00:00:00Z", testOwnerHandle)
+	dups, err = s.CycleIDDuplicates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 2 || dups[0].ID != "C-0003" || dups[1].ID != "C-0007" {
+		t.Errorf("groups = %+v, want C-0003 then C-0007", dups)
 	}
 }

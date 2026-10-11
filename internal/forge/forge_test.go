@@ -181,6 +181,24 @@ func TestGitHubAssignIssue(t *testing.T) {
 	}})
 }
 
+func TestGitHubSetIssueAssignees(t *testing.T) {
+	fr := &fakeRunner{}
+	c := New(ghRemote(), withRunner(fr.run))
+
+	if err := c.SetIssueAssignees(context.Background(), 42, []string{"u1", "u2"}); err != nil {
+		t.Fatalf("SetIssueAssignees: %v", err)
+	}
+	assertCalls(t, fr.calls, call{"gh", []string{
+		"issue", "edit", "42", "--repo", "RTwoStudio/orbit", "--add-assignee", "u1,u2",
+	}})
+}
+
+func TestGitHubSetIssueAssigneesError(t *testing.T) {
+	fr := &fakeRunner{errs: []error{errors.New("boom")}}
+	c := New(ghRemote(), withRunner(fr.run))
+	wantError(t, c.SetIssueAssignees(context.Background(), 42, []string{"u1"}), exit.General)
+}
+
 func TestGitLabCreateIssue(t *testing.T) {
 	const url = "https://gitlab.com/RTwoStudio/orbit/-/issues/9"
 	fr := &fakeRunner{outputs: [][]byte{[]byte("Creating issue in RTwoStudio/orbit\n\n" + url + "\n")}}
@@ -259,6 +277,24 @@ func TestGitLabAssignIssue(t *testing.T) {
 	assertCalls(t, fr.calls, call{"glab", []string{
 		"issue", "update", "9", "--repo", "RTwoStudio/orbit", "--milestone", "4",
 	}})
+}
+
+func TestGitLabSetIssueAssignees(t *testing.T) {
+	fr := &fakeRunner{}
+	c := New(glRemote(), withRunner(fr.run))
+
+	if err := c.SetIssueAssignees(context.Background(), 9, []string{"u1", "u2"}); err != nil {
+		t.Fatalf("SetIssueAssignees: %v", err)
+	}
+	assertCalls(t, fr.calls, call{"glab", []string{
+		"issue", "update", "9", "--repo", "RTwoStudio/orbit", "--assignee", "u1,u2",
+	}})
+}
+
+func TestGitLabSetIssueAssigneesError(t *testing.T) {
+	fr := &fakeRunner{errs: []error{errors.New("boom")}}
+	c := New(glRemote(), withRunner(fr.run))
+	wantError(t, c.SetIssueAssignees(context.Background(), 9, []string{"u1"}), exit.General)
 }
 
 func TestAvailableOK(t *testing.T) {

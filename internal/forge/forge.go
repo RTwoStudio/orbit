@@ -46,6 +46,10 @@ type Client interface {
 	CreateMilestone(ctx context.Context, title, due string) (Milestone, error)
 	// AssignIssue attaches an issue to a milestone.
 	AssignIssue(ctx context.Context, issue, milestone int) error
+	// SetIssueAssignees adds the given forge usernames as assignees of an issue.
+	// It is additive/idempotent — a username already assigned is left in place
+	// and none is ever removed.
+	SetIssueAssignees(ctx context.Context, issue int, usernames []string) error
 }
 
 // runFunc is the injectable seam over exec so wrapper argv and output parsing

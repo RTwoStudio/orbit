@@ -26,7 +26,7 @@ W-0001-arash-jafarpour). A legacy bare W-#### still resolves read-only.
 Subcommands:
   new "<title>" --scope <s>                Capture a Backlog item
   shape <W-####-<owner-slug>> --appetite big|small   Backlog → Pitched (needs filled shape)
-  bet <W-####-<owner-slug>>                Pitched → Bet into the open cycle
+  bet <W-####-<owner-slug>> --assignee <handle>[,<handle>...]   Pitched → Bet into the open cycle
   shelve <W-####-<owner-slug>>             Park an item (→ Shelved)
   unshelve <W-####-<owner-slug>>           Shelved → Pitched
   deliver <W-####-<owner-slug>>            Bet → Delivered (terminal)
@@ -140,9 +140,46 @@ Example:
 }
 
 func newCyclesWorkBetCmd() *cobra.Command {
-	return newCyclesWorkVerbCmd("bet", "Commit a Pitched item to the open cycle (Pitched → Bet)",
-		"Preflight: the item must be Pitched (exit 7 otherwise) and CURRENT must\npoint at an open cycle (exit 7 without one).",
-		(*cycles.Store).BetWork)
+	var assignees []string
+	cmd := &cobra.Command{
+		Use:   "bet <W-####-<owner-slug>> --assignee <handle>[,<handle>...]",
+		Short: "Commit a Pitched item to the open cycle (Pitched → Bet)",
+		Long: `Pitched → Bet: moves the item into the open cycle and stamps its
+` + "`assignees:`" + ` list. At least one --assignee is required; every handle
+must exist in the developer roster (Cycles/developers.yml). --assignee accepts a
+comma-separated list and may be repeated; handles are deduped, first-seen order
+preserved.
+
+Preflight: the item must be Pitched (exit 7 otherwise); CURRENT must point at
+an open cycle (exit 7 without one); at least one assignee is required (exit 6);
+an empty or unknown handle is exit 6.
+
+Exit codes: 0 ok · 2 usage · 5 not_found · 6 preflight_failed
+            7 state_conflict · 10 io_error
+
+Example:
+  orbit cycles work bet W-0003-arash-jafarpour --assignee arash-jafarpour,seyed-mahdi-rostami`,
+		Args:         usageArgs(cobra.ExactArgs(1)),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openCyclesVault()
+			if err != nil {
+				return err
+			}
+			item, err := s.BetWork(args[0], assignees)
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return writeJSON(cmd.OutOrStdout(), item)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s → %s\n", item.ID, item.Status)
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&assignees, "assignee", nil,
+		"roster handle(s) to assign (comma-separated, repeatable; required)")
+	return cmd
 }
 
 func newCyclesWorkShelveCmd() *cobra.Command {

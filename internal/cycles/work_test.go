@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ scope: {{SCOPE}}
 status: Backlog
 appetite:
 cycle:
+assignees: []
 project:
 provider:
 repo:
@@ -303,9 +305,12 @@ func TestNewWorkLifecycle(t *testing.T) {
 	assertLastHistory(t, shaped.History, "Backlog", "Pitched", "appetite: small")
 
 	setCurrent(t, s, "C-0001")
-	bet, err := s.BetWork("W-0001-arash-jafarpour")
+	bet, err := s.BetWork("W-0001-arash-jafarpour", []string{testOwnerHandle})
 	if err != nil {
 		t.Fatalf("BetWork: %v", err)
+	}
+	if !reflect.DeepEqual(bet.Assignees, []string{testOwnerHandle}) {
+		t.Errorf("bet assignees = %v, want [%s]", bet.Assignees, testOwnerHandle)
 	}
 	cyclePath := filepath.Join(s.CycleDir("C-0001"), "W-0001-arash-jafarpour - voice-search.md")
 	if bet.Status != "Bet" || bet.Cycle != "C-0001" {
@@ -346,7 +351,7 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 	assertLastHistory(t, unshelved.History, "Shelved", "Pitched", "")
 
-	if _, err := s.BetWork("W-0001-arash-jafarpour"); err != nil {
+	if _, err := s.BetWork("W-0001-arash-jafarpour", []string{testOwnerHandle}); err != nil {
 		t.Fatalf("re-BetWork: %v", err)
 	}
 	delivered, err := s.DeliverWork("W-0001-arash-jafarpour")
@@ -412,7 +417,7 @@ func TestBacklogToBetRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	setCurrent(t, s, "C-0001")
-	if _, err := s.BetWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
+	if _, err := s.BetWork("W-0001-arash-jafarpour", []string{testOwnerHandle}); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("Backlog → Bet code = %v, want state_conflict", codeOf(t, err))
 	}
 }
@@ -426,7 +431,7 @@ func TestBetWithoutCurrent(t *testing.T) {
 	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "big"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.BetWork("W-0001-arash-jafarpour")
+	_, err := s.BetWork("W-0001-arash-jafarpour", []string{testOwnerHandle})
 	if codeOf(t, err) != exit.StateConflict {
 		t.Fatalf("bet without CURRENT code = %v, want state_conflict", codeOf(t, err))
 	}
@@ -573,6 +578,7 @@ func TestWorkItemJSONShape(t *testing.T) {
 	}
 	for _, key := range []string{
 		`"id"`, `"title"`, `"owner"`, `"owner_name"`, `"scope"`, `"status"`, `"appetite"`, `"cycle"`,
+		`"assignees":[]`,
 		`"project"`, `"provider":"github"`, `"repo":"RTwoStudio/orbit"`,
 		`"issue":7`, `"milestone":3`, `"neocortex_issue"`, `"path"`,
 		`"created"`, `"registry_version"`, `"history":[]`,
@@ -580,5 +586,153 @@ func TestWorkItemJSONShape(t *testing.T) {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("marshalled WorkItem missing %s: %s", key, data)
 		}
+	}
+}
+
+// TestWorkItemAssigneesReadShape: a new note and a legacy note without the key
+// both render a non-nil empty assignees list, so --json never emits null.
+func TestWorkItemAssigneesReadShape(t *testing.T) {
+	s := setupVault(t)
+	it, err := s.NewWork("No assignees yet", "scope-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Assignees == nil || len(it.Assignees) != 0 {
+		t.Errorf("new item assignees = %#v, want empty non-nil", it.Assignees)
+	}
+	data, err := json.Marshal(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"assignees":[]`) {
+		t.Errorf("new item JSON missing \"assignees\":[]: %s", data)
+	}
+
+	// A legacy note with no assignees: key normalizes to [] (not null).
+	legacy := filepath.Join(s.BacklogDir(), "W-0042 - legacy.md")
+	note := "---\nid: W-0042\ntitle: \"Legacy\"\nscope: old\nstatus: Backlog\nhistory: []\n---\n\n# W-0042 — Legacy\n"
+	if err := fsutil.AtomicWrite(legacy, []byte(note), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ShowWork("W-0042")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Assignees == nil || len(got.Assignees) != 0 {
+		t.Errorf("legacy item assignees = %#v, want empty non-nil", got.Assignees)
+	}
+}
+
+// TestBetWorkAssigneesStampsDedupes: BetWork trims, roster-validates and dedupes
+// the assignee list, preserving first-seen order, and it round-trips through a
+// read.
+func TestBetWorkAssigneesStampsDedupes(t *testing.T) {
+	s := setupVault(t)
+	writeRoster(t, s, testRosterTwo)
+	if _, err := s.NewCycle("Team", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it, err := s.NewWork("Assigned", "scope-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillShapeSections(t, it.Path)
+	if _, err := s.ShapeWork(it.ID, "small"); err != nil {
+		t.Fatal(err)
+	}
+
+	bet, err := s.BetWork(it.ID, []string{
+		"seyed-mahdi-rostami",
+		" arash-jafarpour ",
+		"seyed-mahdi-rostami", // duplicate dropped
+	})
+	if err != nil {
+		t.Fatalf("BetWork: %v", err)
+	}
+	want := []string{"seyed-mahdi-rostami", "arash-jafarpour"}
+	if !reflect.DeepEqual(bet.Assignees, want) {
+		t.Errorf("assignees = %v, want %v", bet.Assignees, want)
+	}
+
+	back, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(back.Assignees, want) {
+		t.Errorf("round-trip assignees = %v, want %v", back.Assignees, want)
+	}
+}
+
+// TestBetWorkAssigneesFaults: an empty set and an unknown handle are
+// preflight_failed (6) and leave the item Pitched in backlog/.
+func TestBetWorkAssigneesFaults(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NewCycle("Team", "0.1.0", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	it, err := s.NewWork("Assigned", "scope-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillShapeSections(t, it.Path)
+	if _, err := s.ShapeWork(it.ID, "small"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.BetWork(it.ID, nil); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("empty assignees code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.BetWork(it.ID, []string{"  "}); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("blank assignee code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.BetWork(it.ID, []string{"nobody"}); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("unknown assignee code = %v, want preflight_failed", codeOf(t, err))
+	}
+
+	show, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.Status != "Pitched" || show.Cycle != "" {
+		t.Errorf("status after failed bets = %s/%q, want Pitched/empty", show.Status, show.Cycle)
+	}
+}
+
+// TestSetAssigneesValidatesAndPersists: handles are trimmed, roster-validated,
+// deduped, non-empty enforced, persisted, and round-trip through a read.
+func TestSetAssigneesValidatesAndPersists(t *testing.T) {
+	s := setupVault(t)
+	writeRoster(t, s, testRosterTwo)
+	it, err := s.NewWork("Assign me", "scope-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SetAssignees(it.ID, []string{
+		" arash-jafarpour ", "seyed-mahdi-rostami", "arash-jafarpour",
+	})
+	if err != nil {
+		t.Fatalf("SetAssignees: %v", err)
+	}
+	want := []string{"arash-jafarpour", "seyed-mahdi-rostami"}
+	if !reflect.DeepEqual(got.Assignees, want) {
+		t.Errorf("assignees = %v, want %v", got.Assignees, want)
+	}
+	back, err := s.ShowWork(it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(back.Assignees, want) {
+		t.Errorf("round-trip assignees = %v, want %v", back.Assignees, want)
+	}
+
+	if _, err := s.SetAssignees(it.ID, nil); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("empty assignees code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.SetAssignees(it.ID, []string{"nobody"}); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("unknown assignee code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.SetAssignees("W-0099", []string{testOwnerHandle}); codeOf(t, err) != exit.NotFound {
+		t.Errorf("missing work code = %v, want not_found", codeOf(t, err))
 	}
 }

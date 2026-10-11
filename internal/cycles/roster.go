@@ -110,6 +110,45 @@ func (r *Roster) Handles() []string {
 	return out
 }
 
+// validateRosterHandles trims and roster-validates a handle list — a cycle's
+// `subscribers:` or a work item's `assignees:` — deduping while preserving
+// first-seen order. kind names the role in error messages ("subscriber" or
+// "assignee"). Every handle must be non-empty and known to the roster; an empty
+// or unknown handle is a preflight_failed (6). When requireNonEmpty is set, an
+// empty (or all-blank) list is also a preflight_failed (6).
+func (s *Store) validateRosterHandles(kind string, handles []string, requireNonEmpty bool) ([]string, error) {
+	r, err := s.LoadRoster()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(handles))
+	seen := make(map[string]bool, len(handles))
+	for _, h := range handles {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			return nil, exit.New(exit.PreflightFailed,
+				kind+" handle must not be empty",
+				"pass a roster handle, e.g. <handle>")
+		}
+		if _, ok := r.Lookup(h); !ok {
+			return nil, exit.New(exit.PreflightFailed,
+				fmt.Sprintf("unknown %s %q — not in the developer roster", kind, h),
+				"add the handle to "+s.RosterPath()+" first")
+		}
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	if requireNonEmpty && len(out) == 0 {
+		return nil, exit.New(exit.PreflightFailed,
+			"at least one "+kind+" handle is required",
+			"pass one or more roster handles, e.g. --assignee <handle>")
+	}
+	return out, nil
+}
+
 // LoadRoster reads and validates <vaultRoot>/Cycles/developers.yml. A missing
 // file is a preflight_failed (6) with an install hint.
 func (s *Store) LoadRoster() (*Roster, error) {
