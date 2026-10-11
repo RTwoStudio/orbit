@@ -20,7 +20,7 @@ orbit neocortex task         # new | start | revise | close | rework | list | sh
 orbit neocortex close        # verify a default-lane issue is complete (read-only)
 orbit cycles install         # first contact: fetch → cache → deploy → bootstrap the vault
 orbit cycles work            # new | shape | bet | shelve | unshelve | deliver | sync | list | show
-orbit cycles cycle           # new | sync | close | list | show
+orbit cycles cycle           # new | close | validate | reconcile | sync | list | show
 orbit cycles status          # board: current cycle + backlog ladder
 orbit completion             # install bash/zsh/fish/powershell completion
 ```
@@ -42,12 +42,18 @@ are verbs, never `--set`: `quick` and `task` share the short verbs
 Orbit ships two domains, one per level of abstraction:
 
 - **Cycles** — the **planning and commitment** layer. It answers *what should
-  we work on, why, and when are we committing to it?* Work items (`W-####`)
-  are captured, shaped, and bet into time-boxed cycles (`C-####`) whose
-  Markdown lives in a global vault (`<vault.dir>/Cycles/`). It is offline by
-  default: only the two explicit sync verbs — `work sync` and `cycle sync` —
-  touch the network, mirroring bets and cycles to GitHub/GitLab issues and
-  milestones via the `gh`/`glab` CLIs.
+  we work on, why, and when are we committing to it?* Work items
+  (`W-<seq>-<owner-slug>`) are captured, shaped, and bet into time-boxed
+  cycles (`C-####`) whose Markdown lives in a global vault
+  (`<vault.dir>/Cycles/`) — a **git repository each developer clones**, so the
+  vault stays shareable. The roster (`Cycles/developers.yml`) is the single
+  identity map: the local handle resolves from the clone's git identity
+  (`git config user.name` / `user.email`) and drives owner-namespaced ids and
+  `assignees:`. The CLI itself is offline and never runs git or pushes — the
+  multi-writer loop (pull → validate → allocate → write → commit → ask → push)
+  is the agent's job. Only the two explicit sync verbs — `work sync` and
+  `cycle sync` — touch the network, mirroring bets and cycles to GitHub/GitLab
+  issues and milestones via the `gh`/`glab` CLIs.
 - **NeoCortex** — the **engineering execution** layer. It answers *how do we
   actually build it?* Issues, plans, and tasks live in a project's
   `.neocortex/`.
@@ -60,7 +66,7 @@ gracefully when unlinked. The bridge is the pair `{project dir, issue:int}`
 (NeoCortex tasks stay `T1..Tn`; there is no synthetic cross-system ID).
 Only a human marks a Cycles item `Delivered`.
 
-## Registry contract (neocortex 0.7.0 · cycles 0.1.0)
+## Registry contract (neocortex 0.7.0 · cycles 0.1.5)
 
 The registry is a git repo (default GitHub). Everything deployable lives
 under the domain folders — `neocortex/` and the sibling `cycles/` tree;
@@ -322,7 +328,11 @@ one-line load step, and is safe to re-run. Override the target directory with
   prints the report. Quick runs close through `quick close <N>`.
 - **Cycles domain.** `orbit cycles` adds the vault-rooted planning layer
   (`work`/`cycle`/`status`) beside neocortex; `orbit cycles install` (alias
-  `init`) bootstraps `<vault.dir>/Cycles/` idempotently. It stays offline
+  `init`) bootstraps `<vault.dir>/Cycles/` idempotently. The vault is a shared
+  git clone: work ids are owner-namespaced (`W-<seq>-<owner-slug>`), identity
+  comes from the `developers.yml` roster, and `cycle validate`/`reconcile`
+  guard the team-global `C-####` allocation while the agent runs the git loop
+  (pull → validate → allocate → write → commit → ask → push). It stays offline
   except for the opt-in forge sync verbs `work sync` / `cycle sync`
   (`gh`/`glab`), which mirror bets/cycles to GitHub/GitLab issues/milestones.
 - Update touches only global state (cache, opencode assets,

@@ -7,13 +7,17 @@
 # git URL, and drives the full lifecycle in a throwaway vault — all under an
 # isolated HOME so the developer's ~/.config is never touched.
 #
-# Sequence (per cycles-v1-plan.md §5):
-#   install → work new → shape → cycle new → bet → deliver
+# Sequence:
+#   install → (seed roster + vault git identity) → work new → shape → cycle new
+#           → bet --assignee → deliver
 #           → work new → shape → bet → cycle close (auto-shelve)
 #           → list/show/status (human + --json) → update (both domains)
-#           → forge sync (stubbed gh/glab: cycle sync → work sync, github
-#             + gitlab, idempotency, skip/override, missing-CLI/unauthenticated
-#             degradation)
+#           → forge sync (stubbed gh/glab: cycle sync → work sync assignee
+#             mapping, github + gitlab, idempotency, skip/override,
+#             missing-CLI/unauthenticated degradation)
+#           → two-writer simulation (throwaway bare origin + devA/devB clones:
+#             owner-namespaced ids, CURRENT auto-clear, duplicate-C-####
+#             validate/reconcile, and the push-rejection rebase keep-both path)
 # plus the exit-code contract and a no-neocortex-regression check.
 #
 # Usage:
@@ -111,6 +115,7 @@ ok()   { PASS=$((PASS + 1)); printf '  [%s] %s\n' "$(green ok)" "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '  [%s] %s\n' "$(red FAIL)" "$1"; }
 
 assert_rc()   { [ "$LAST_RC" = "$2" ] && ok "$1 (exit $LAST_RC)" || bad "$1: want exit $2, got $LAST_RC"; }
+assert_rc_ne() { [ "$LAST_RC" != "$2" ] && ok "$1 (exit $LAST_RC)" || bad "$1: want exit != $2, got $LAST_RC"; }
 assert_file() { [ -f "$2" ] && ok "$1 ($2)" || bad "$1: missing file $2"; }
 assert_dir()  { [ -d "$2" ] && ok "$1 ($2)" || bad "$1: missing dir $2"; }
 assert_empty() { [ ! -s "$2" ] && ok "$1 (empty)" || bad "$1: expected empty $2"; }
@@ -207,30 +212,60 @@ run cycles install
 assert_rc "cycles install (idempotent)" 0
 
 # ---------------------------------------------------------------------------
+section "vault identity + developers.yml roster (shared-vault surface)"
+
+# T1 resolves the local handle from the vault clone's git identity
+# (git config user.name/user.email) matched against Cycles/developers.yml. The
+# installed roster is an all-comments template (an empty roster is exit 6), so
+# seed a real two-entry roster, give the vault a git identity, and gitignore
+# the local CURRENT cursor so a shared clone never fights over it (design §6).
+cat > "$VAULT/Cycles/developers.yml" <<'ROSTER'
+arash-jafarpour:
+  name: Arash Jafarpour
+  email: arash@rtwo.studio
+  github: arashjf
+  gitlab: arashjf
+seyed-mahdi-rostami:
+  name: Seyed Mahdi Rostami
+  email: seyed@rtwo.studio
+  github: seyedmr
+  gitlab: seyedmr
+ROSTER
+printf '%s\n' "Cycles/CURRENT" > "$VAULT/.gitignore"
+( cd "$VAULT" && git init -q -b main \
+  && git config user.name "Arash Jafarpour" \
+  && git config user.email "arash@rtwo.studio" \
+  && git add -A \
+  && git commit -qm "smoke vault seed" )
+assert_dir "vault is a git clone" "$VAULT/.git"
+assert_has "vault .gitignore keeps CURRENT local" "Cycles/CURRENT" "$VAULT/.gitignore"
+
+# ---------------------------------------------------------------------------
 section "work new → shape → bet-without-cycle (state_conflict)"
 
 run cycles work new "Voice search" --scope delijan-driver-app --json
 assert_rc "work new" 0
 w1="$(json_field id "$LAST_OUT")"
-[ "$w1" = "W-0001" ] && ok "work new id is W-0001" || bad "work new id: want W-0001, got '$w1'"
+[ "$w1" = "W-0001-arash-jafarpour" ] && ok "work new id is W-0001-arash-jafarpour" || bad "work new id: want W-0001-arash-jafarpour, got '$w1'"
+assert_out_has "work new stamps the owner" '"owner": "arash-jafarpour"'
 w1_path="$(json_field path "$LAST_OUT")"
 assert_file "W-0001 note on disk" "$w1_path"
 assert_has "W-0001 starts Backlog" "status: Backlog" "$w1_path"
 
 fill_shape "$w1_path"
-run cycles work shape W-0001 --appetite small --json
+run cycles work shape W-0001-arash-jafarpour --appetite small --json
 assert_rc "work shape" 0
 assert_out_has "W-0001 is Pitched" '"status": "Pitched"'
 
-# No cycle open yet: bet must be a state_conflict (exit 7).
-run cycles work bet W-0001
+# No cycle open yet: bet must be a state_conflict (exit 7), assignee or not.
+run cycles work bet W-0001-arash-jafarpour --assignee arash-jafarpour
 assert_rc "work bet without a cycle → 7" 7
 
 # Malformed / unknown id contract.
 run cycles work show W-X
 assert_rc "malformed id → 6" 6
-run cycles work show W-9999
-assert_rc "unknown id → 5" 5
+run cycles work show W-9999-arash-jafarpour
+assert_rc "unknown composite id → 5" 5
 
 # Uninitialized vault contract (exit 11).
 EMPTY_VAULT="$TMP/empty-vault"
@@ -245,15 +280,23 @@ assert_rc "cycle new" 0
 c1="$(json_field id "$LAST_OUT")"
 [ "$c1" = "C-0001" ] && ok "cycle id is C-0001" || bad "cycle id: want C-0001, got '$c1'"
 assert_out_has "cycle is Open" '"status": "Open"'
+assert_out_has "cycle records the creator" '"created_by": "arash-jafarpour"'
 assert_has "CURRENT points at C-0001" "C-0001" "$VAULT/Cycles/CURRENT"
 
-run cycles work bet W-0001 --json
+# A clean post-pull vault passes the duplicate-C-#### preflight.
+run cycles cycle validate
+assert_rc "cycle validate (clean)" 0
+assert_out_has "cycle validate reports ids ok" "cycle ids ok (1 cycles)"
+
+run cycles work bet W-0001-arash-jafarpour --assignee arash-jafarpour --json
 assert_rc "work bet" 0
 assert_out_has "W-0001 is Bet" '"status": "Bet"'
 assert_out_has "W-0001 cycle is C-0001" '"cycle": "C-0001"'
-assert_file "W-0001 moved into the cycle" "$VAULT/Cycles/cycles/C-0001/W-0001 - voice-search.md"
+assert_out_has "W-0001 records its assignees" '"assignees": ['
+assert_out_has "W-0001 keeps the roster handle" '"arash-jafarpour"'
+assert_file "W-0001 moved into the cycle" "$VAULT/Cycles/cycles/C-0001/W-0001-arash-jafarpour - voice-search.md"
 
-run cycles work deliver W-0001 --json
+run cycles work deliver W-0001-arash-jafarpour --json
 assert_rc "work deliver" 0
 assert_out_has "W-0001 is Delivered" '"status": "Delivered"'
 
@@ -262,11 +305,13 @@ section "second item → bet → cycle close auto-shelves it"
 
 run cycles work new "Offline mode" --scope delijan-driver-app --json
 assert_rc "work new (second)" 0
+w2="$(json_field id "$LAST_OUT")"
+[ "$w2" = "W-0002-arash-jafarpour" ] && ok "second id advances the owner's own sequence: $w2" || bad "second id: want W-0002-arash-jafarpour, got '$w2'"
 w2_path="$(json_field path "$LAST_OUT")"
 fill_shape "$w2_path"
-run cycles work shape W-0002 --appetite big --json
+run cycles work shape W-0002-arash-jafarpour --appetite big --json
 assert_rc "work shape (second)" 0
-run cycles work bet W-0002 --json
+run cycles work bet W-0002-arash-jafarpour --assignee seyed-mahdi-rostami --json
 assert_rc "work bet (second)" 0
 
 run cycles cycle close --json
@@ -275,21 +320,21 @@ assert_out_has "cycle is Closed" '"status": "Closed"'
 assert_empty "CURRENT cleared after close" "$VAULT/Cycles/CURRENT"
 assert_has "cycle note is Closed" "status: Closed" "$VAULT/Cycles/cycles/C-0001/C-0001.md"
 
-w2_backlog="$(backlog_path W-0002)"
+w2_backlog="$(backlog_path W-0002-arash-jafarpour)"
 assert_file "W-0002 auto-shelved to backlog/" "$w2_backlog"
 assert_has "W-0002 is Shelved" "status: Shelved" "$w2_backlog"
-assert_file "delivered W-0001 stays in the cycle" "$VAULT/Cycles/cycles/C-0001/W-0001 - voice-search.md"
-assert_has "delivered W-0001 stays Delivered" "status: Delivered" "$VAULT/Cycles/cycles/C-0001/W-0001 - voice-search.md"
+assert_file "delivered W-0001 stays in the cycle" "$VAULT/Cycles/cycles/C-0001/W-0001-arash-jafarpour - voice-search.md"
+assert_has "delivered W-0001 stays Delivered" "status: Delivered" "$VAULT/Cycles/cycles/C-0001/W-0001-arash-jafarpour - voice-search.md"
 
 # ---------------------------------------------------------------------------
 section "list / show / status (human + --json)"
 
 run cycles work list --json
 assert_rc "work list --json" 0
-assert_out_has "list has delivered W-0001" '"id": "W-0001"'
-assert_out_has "list has shelved W-0002" '"id": "W-0002"'
+assert_out_has "list has delivered W-0001" '"id": "W-0001-arash-jafarpour"'
+assert_out_has "list has shelved W-0002" '"id": "W-0002-arash-jafarpour"'
 
-run cycles work show W-0001 --json
+run cycles work show W-0001-arash-jafarpour --json
 assert_rc "work show --json" 0
 assert_out_has "show W-0001 Delivered" '"status": "Delivered"'
 
@@ -304,7 +349,7 @@ assert_out_has "cycle show C-0001 Closed" '"status": "Closed"'
 run cycles status --json
 assert_rc "status --json" 0
 assert_out_has "no current cycle" '"current": null'
-assert_out_has "shelved W-0002 on the board" '"id": "W-0002"'
+assert_out_has "shelved W-0002 on the board" '"id": "W-0002-arash-jafarpour"'
 
 run cycles status
 assert_rc "status (human)" 0
@@ -469,7 +514,7 @@ w3_backlog="$(json_field path "$LAST_OUT")"
 fill_shape "$w3_backlog"
 run cycles work shape "$w3" --appetite small --json
 assert_rc "work shape (forge gh)" 0
-run cycles work bet "$w3" --json
+run cycles work bet "$w3" --assignee arash-jafarpour --json
 assert_rc "work bet (forge gh)" 0
 w3_path="$(json_field path "$LAST_OUT")"
 assert_file "forge gh bet sits in the cycle" "$w3_path"
@@ -521,6 +566,9 @@ assert_out_has "work sync json action created" '"action": "created"'
 assert_out_has "work sync json provider github" '"provider": "github"'
 assert_out_has "work sync json repo" '"repo": "RTwoStudio/orbit"'
 assert_out_has "work sync json milestone" "\"milestone\": $gh_ms"
+assert_out_has "work sync json carries the mapped assignees" '"assignees": ['
+assert_out_has "work sync json maps handle → github username" '"arashjf"'
+assert_has "gh receives --add-assignee with the roster username" "--add-assignee arashjf" "$STUB_BIN/gh.log"
 gh_issue="$(json_num issue "$LAST_OUT")"
 [ -n "$gh_issue" ] && [ "$gh_issue" -gt 0 ] \
   && ok "work sync recorded issue #$gh_issue" \
@@ -551,7 +599,7 @@ w4_backlog="$(json_field path "$LAST_OUT")"
 fill_shape "$w4_backlog"
 run cycles work shape "$w4" --appetite small --json
 assert_rc "work shape (unscoped)" 0
-run cycles work bet "$w4" --json
+run cycles work bet "$w4" --assignee arash-jafarpour --json
 assert_rc "work bet (unscoped)" 0
 w4_path="$(json_field path "$LAST_OUT")"
 assert_grep "unscoped bet has an empty project:" "^project:$" "$w4_path"
@@ -599,7 +647,7 @@ w5_backlog="$(json_field path "$LAST_OUT")"
 fill_shape "$w5_backlog"
 run cycles work shape "$w5" --appetite small --json
 assert_rc "work shape (forge glab)" 0
-run cycles work bet "$w5" --json
+run cycles work bet "$w5" --assignee seyed-mahdi-rostami --json
 assert_rc "work bet (forge glab)" 0
 w5_path="$(json_field path "$LAST_OUT")"
 sed -i "s|^project:.*|project: $TMP/proj-gl|" "$w5_path"
@@ -638,12 +686,274 @@ assert_out_has "glab work action updated" '"action": "updated"'
 assert_out_has "glab work provider" '"provider": "gitlab"'
 assert_out_has "glab work repo" '"repo": "rtwo/orbit"'
 assert_out_has "glab work milestone" "\"milestone\": $gl_ms"
+assert_out_has "glab work json carries the mapped assignees" '"assignees": ['
+assert_out_has "glab work json maps handle → gitlab username" '"seyedmr"'
+assert_has "glab receives --assignee with the roster username" "--assignee seyedmr" "$STUB_BIN/glab.log"
 gl_issue="$(json_num issue "$LAST_OUT")"
 [ -n "$gl_issue" ] && [ "$gl_issue" -gt 0 ] \
   && ok "glab work recorded issue #$gl_issue" || bad "glab issue number not found"
 assert_has "work note records gitlab provider" "provider: gitlab" "$w5_path"
 assert_has "work note records gitlab issue" "issue: $gl_issue" "$w5_path"
 assert_has "glab issue URL uses the /-/issues/ form" "https://gitlab.com/rtwo/orbit/-/issues/$gl_issue" "$STUB_BIN/glab.log"
+
+# ---------------------------------------------------------------------------
+section "two-writer simulation: throwaway origin + devA/devB clones"
+
+# A self-contained shared vault: a bare origin plus two full clones, each with
+# its own git identity. The handle resolves from the clone's user.name/
+# user.email against Cycles/developers.yml, so the same HOME/ORBIT_CONFIG serves
+# both writers (every call passes --vault <clone>). CURRENT is local/gitignored
+# (design §6), so the two cursors never collide in git.
+TW="$TMP/two-writer"
+TW_SEED="$TW/seed"
+TW_ORIGIN="$TW/origin.git"
+TWA="$TW/devA"
+TWB="$TW/devB"
+mkdir -p "$TW"
+export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
+
+# tw_git <repo> <args...>: run one git step of the documented loop and echo it
+# so the transcript reads as the agent's pull → validate → commit → push flow.
+tw_git() {
+  local repo="$1"; shift
+  printf '\n$ git -C %s %s\n' "$repo" "$*"
+  local errf="$TMP/.giterr"
+  set +e
+  LAST_OUT="$(git -C "$repo" "$@" 2>"$errf")"
+  LAST_RC=$?
+  set -e
+  if [ -n "$LAST_OUT" ]; then printf '%s\n' "$LAST_OUT" | sed 's/^/  /'; fi
+  if [ -s "$errf" ]; then sed 's/^/  ! /' "$errf"; fi
+  printf '  → exit %s\n' "$LAST_RC"
+}
+
+run cycles --vault "$TW_SEED" install
+assert_rc "two-writer seed install" 0
+assert_dir "seed vault Cycles/" "$TW_SEED/Cycles"
+
+cat > "$TW_SEED/Cycles/developers.yml" <<'ROSTER'
+arash-jafarpour:
+  name: Arash Jafarpour
+  email: arash@rtwo.studio
+  github: arashjf
+  gitlab: arashjf
+seyed-mahdi-rostami:
+  name: Seyed Mahdi Rostami
+  email: seyed@rtwo.studio
+  github: seyedmr
+  gitlab: seyedmr
+ROSTER
+printf '%s\n' "Cycles/CURRENT" > "$TW_SEED/.gitignore"
+
+tw_git "$TW_SEED" init -q -b main
+tw_git "$TW_SEED" config user.name "Arash Jafarpour"
+tw_git "$TW_SEED" config user.email "arash@rtwo.studio"
+tw_git "$TW_SEED" add -A
+tw_git "$TW_SEED" commit -qm "seed shared vault"
+
+git init -q --bare "$TW_ORIGIN"
+git -C "$TW_ORIGIN" symbolic-ref HEAD refs/heads/main
+tw_git "$TW_SEED" remote add origin "$TW_ORIGIN"
+tw_git "$TW_SEED" push -q -u origin main
+assert_rc "seed push to origin" 0
+
+tw_git "$TW" clone -q "$TW_ORIGIN" "$TWA"
+tw_git "$TW" clone -q "$TW_ORIGIN" "$TWB"
+tw_git "$TWA" config user.name "Arash Jafarpour"
+tw_git "$TWA" config user.email "arash@rtwo.studio"
+tw_git "$TWB" config user.name "Seyed Mahdi Rostami"
+tw_git "$TWB" config user.email "seyed@rtwo.studio"
+assert_dir "devA clone" "$TWA/Cycles"
+assert_dir "devB clone" "$TWB/Cycles"
+
+# --- (a) owner-namespaced ids, independent per-owner sequences --------------
+section "two-writer (a): owner-namespaced ids, per-owner sequences"
+
+run cycles --vault "$TWA" work new "Voice search" --scope delijan-driver-app --json
+assert_rc "devA work new" 0
+wa1="$(json_field id "$LAST_OUT")"
+[ "$wa1" = "W-0001-arash-jafarpour" ] && ok "devA mints $wa1" || bad "devA id: want W-0001-arash-jafarpour, got '$wa1'"
+
+run cycles --vault "$TWB" work new "Voice search" --scope delijan-driver-app --json
+assert_rc "devB work new" 0
+wb1="$(json_field id "$LAST_OUT")"
+[ "$wb1" = "W-0001-seyed-mahdi-rostami" ] && ok "devB mints $wb1" || bad "devB id: want W-0001-seyed-mahdi-rostami, got '$wb1'"
+
+run cycles --vault "$TWA" work new "Offline mode" --scope delijan-driver-app --json
+assert_rc "devA work new (second)" 0
+wa2="$(json_field id "$LAST_OUT")"
+[ "$wa2" = "W-0002-arash-jafarpour" ] && ok "devA's second mint advances only its own sequence: $wa2" || bad "devA second id: want W-0002-arash-jafarpour, got '$wa2'"
+
+[ "$wa1" != "$wb1" ] && ok "no cross-owner id collision ($wa1 vs $wb1)" || bad "devA and devB minted the same id $wa1"
+
+# Each writer commits offline, then they reconcile over the shared origin.
+tw_git "$TWA" add -A
+tw_git "$TWA" commit -qm "devA: W-0001/W-0002"
+tw_git "$TWA" push -q origin main
+assert_rc "devA push" 0
+tw_git "$TWB" add -A
+tw_git "$TWB" commit -qm "devB: W-0001"
+tw_git "$TWB" pull -q --rebase origin main
+tw_git "$TWB" push -q origin main
+assert_rc "devB rebase + push" 0
+tw_git "$TWA" pull -q --rebase origin main
+assert_file "devA keeps its own W-0001" "$TWA/Cycles/backlog/$wa1 - voice-search.md"
+assert_file "devA merges devB's W-0001" "$TWA/Cycles/backlog/$wb1 - voice-search.md"
+assert_file "devA keeps W-0002" "$TWA/Cycles/backlog/$wa2 - offline-mode.md"
+
+# --- (b) CURRENT auto-clears for a Closed / missing cycle -------------------
+section "two-writer (b): CURRENT auto-clears (Closed upstream / gone)"
+
+run cycles --vault "$TWA" cycle new "Shared cycle one" --release 0.6.0 --json
+assert_rc "devA cycle new" 0
+ca1="$(json_field id "$LAST_OUT")"
+[ "$ca1" = "C-0001" ] && ok "devA opens C-0001" || bad "devA cycle id: want C-0001, got '$ca1'"
+tw_git "$TWA" add -A
+tw_git "$TWA" commit -qm "devA: open C-0001"
+tw_git "$TWA" push -q origin main
+assert_rc "devA push C-0001" 0
+tw_git "$TWB" pull -q --rebase origin main
+assert_file "devB pulled C-0001's note" "$TWB/Cycles/cycles/C-0001/C-0001.md"
+
+# devB models its own local cursor by writing CURRENT directly — it is local,
+# gitignored state, so the second writer never pushes it.
+printf '%s\n' "C-0001" > "$TWB/Cycles/CURRENT"
+assert_has "devB CURRENT models the stale local cursor" "C-0001" "$TWB/Cycles/CURRENT"
+
+# The creator closes C-0001 upstream through the real verb.
+run cycles --vault "$TWA" cycle close --json
+assert_rc "devA cycle close" 0
+tw_git "$TWA" add -A
+tw_git "$TWA" commit -qm "devA: close C-0001"
+tw_git "$TWA" push -q origin main
+tw_git "$TWB" pull -q --rebase origin main
+assert_has "devB sees C-0001 Closed after pull" "status: Closed" "$TWB/Cycles/cycles/C-0001/C-0001.md"
+
+# devB's stale cursor auto-clears on the next CURRENT read, with the notice.
+run cycles --vault "$TWB" cycle close
+assert_rc "devB stale CURRENT (Closed) → 7" 7
+assert_empty "devB CURRENT auto-cleared (Closed)" "$TWB/Cycles/CURRENT"
+assert_has "devB Closed notice" "was closed upstream" "$TMP/.stderr"
+assert_has "devB Closed notice logged" "was closed upstream" "$HOME/.config/orbit/log/orbit.log"
+
+# A pointer whose cycle directory is gone clears the same way.
+printf '%s\n' "C-0009" > "$TWB/Cycles/CURRENT"
+run cycles --vault "$TWB" cycle close
+assert_rc "devB stale CURRENT (gone) → 7" 7
+assert_empty "devB CURRENT auto-cleared (gone)" "$TWB/Cycles/CURRENT"
+assert_has "devB gone notice" "is gone" "$TMP/.stderr"
+
+# --- (c) duplicate C-#### → validate 7 → reconcile → validate 0 -------------
+section "two-writer (c): duplicate C-#### → validate 7 → reconcile → validate 0"
+
+run cycles --vault "$TWA" cycle new "Duplicate plan" --release 0.7.0 --json
+assert_rc "devA cycle new (C-0002)" 0
+ca2="$(json_field id "$LAST_OUT")"
+[ "$ca2" = "C-0002" ] && ok "devA opens C-0002" || bad "devA second cycle id: want C-0002, got '$ca2'"
+
+# Model a "keep both" merge: a second note carrying the same leading C-0002
+# token lands in a differently-named dir and is the later-minted loser.
+mkdir -p "$TWA/Cycles/cycles/C-0002-b"
+sed -e 's/^created_by:.*/created_by: seyed-mahdi-rostami/' \
+    -e 's/^created:.*/created: 2099-01-01T00:00:00Z/' \
+    "$TWA/Cycles/cycles/C-0002/C-0002.md" > "$TWA/Cycles/cycles/C-0002-b/C-0002.md"
+assert_file "duplicate C-0002 note placed" "$TWA/Cycles/cycles/C-0002-b/C-0002.md"
+
+run cycles --vault "$TWA" cycle validate --json
+assert_rc "duplicate cycle → validate 7" 7
+assert_out_has "validate names the winner path" "cycles/C-0002/C-0002.md"
+assert_out_has "validate names the loser path" "cycles/C-0002-b/C-0002.md"
+assert_has "validate names both in the error" "duplicate cycle id C-0002" "$TMP/.stderr"
+
+run cycles --vault "$TWA" cycle reconcile --json
+assert_rc "reconcile renumbers the loser" 0
+assert_out_has "reconcile reports from C-0002" '"from": "C-0002"'
+assert_out_has "reconcile reports to C-0003" '"to": "C-0003"'
+assert_out_has "reconcile moves to the deterministic path" "cycles/C-0003/C-0003.md"
+assert_file "loser moved to the deterministic path" "$TWA/Cycles/cycles/C-0003/C-0003.md"
+assert_has "loser note id rewritten" "id: C-0003" "$TWA/Cycles/cycles/C-0003/C-0003.md"
+assert_file "winner stays at its canonical path" "$TWA/Cycles/cycles/C-0002/C-0002.md"
+assert_has "loser carries one reconcile history line" \
+  "C-0002 → C-0003 (duplicate reconciled)" "$TWA/Cycles/cycles/C-0003/C-0003.md"
+[ "$(grep -cF 'duplicate reconciled' "$TWA/Cycles/cycles/C-0003/C-0003.md")" = "1" ] \
+  && ok "exactly one history line appended" || bad "history line count != 1"
+
+run cycles --vault "$TWA" cycle validate
+assert_rc "clean cycle → validate 0" 0
+assert_out_has "validate reports ids ok" "cycle ids ok"
+
+# Sync the reconciled ledger to the shared origin so (d) starts level.
+run cycles --vault "$TWA" cycle close --json
+assert_rc "devA closes C-0002" 0
+tw_git "$TWA" add -A
+tw_git "$TWA" commit -qm "devA: C-0002 + reconciled C-0003"
+tw_git "$TWA" push -q origin main
+assert_rc "devA push C-0002/C-0003" 0
+tw_git "$TWB" pull -q --rebase origin main
+assert_file "devB pulls the reconciled ledger" "$TWB/Cycles/cycles/C-0003/C-0003.md"
+
+# --- (d) rejected push → rebase keep-both → reconcile -----------------------
+section "two-writer (d): rejected push → rebase keep-both → reconcile"
+
+# Both clones compute the same next C-#### offline (NextCycleID = max + 1).
+run cycles --vault "$TWA" cycle new "Dev A cycle" --release 0.8.0 --json
+assert_rc "devA cycle new (offline)" 0
+da="$(json_field id "$LAST_OUT")"
+run cycles --vault "$TWB" cycle new "Dev B cycle" --release 0.8.1 --json
+assert_rc "devB cycle new (offline)" 0
+db="$(json_field id "$LAST_OUT")"
+[ "$da" = "C-0004" ] && [ "$db" = "C-0004" ] \
+  && ok "both clones mint the same next id $da offline" \
+  || bad "expected both to mint C-0004, got devA='$da' devB='$db'"
+
+# devA wins the push race; devB's push is rejected (non-fast-forward).
+tw_git "$TWA" add -A
+tw_git "$TWA" commit -qm "devA: open C-0004"
+tw_git "$TWA" push -q origin main
+assert_rc "devA push C-0004" 0
+tw_git "$TWB" add -A
+tw_git "$TWB" commit -qm "devB: open C-0004"
+tw_git "$TWB" push origin main
+assert_rc_ne "devB push rejected (non-fast-forward)" 0
+assert_has "devB push rejection hint" "rejected" "$TMP/.giterr"
+
+# The loser rebases; the deterministic path collides (add/add), resolved
+# keep-both: devA's note stays canonical, devB's lands in a sibling dir.
+tw_git "$TWB" pull --rebase origin main
+assert_rc_ne "devB rebase hits the add/add conflict" 0
+tw_git "$TWB" ls-files -u
+assert_out_has "conflict touches the shared cycle note" "Cycles/cycles/C-0004/C-0004.md"
+mkdir -p "$TWB/Cycles/cycles/C-0004-b"
+git -C "$TWB" show :3:Cycles/cycles/C-0004/C-0004.md > "$TWB/Cycles/cycles/C-0004-b/C-0004.md"
+git -C "$TWB" show :2:Cycles/cycles/C-0004/C-0004.md > "$TWB/Cycles/cycles/C-0004/C-0004.md"
+tw_git "$TWB" add -A
+tw_git "$TWB" rebase --continue
+assert_rc "devB rebase completes after keep-both" 0
+assert_file "keep-both kept devA's canonical note" "$TWB/Cycles/cycles/C-0004/C-0004.md"
+assert_file "keep-both kept devB's sibling note" "$TWB/Cycles/cycles/C-0004-b/C-0004.md"
+
+run cycles --vault "$TWB" cycle validate --json
+assert_rc "post-rebase duplicate → validate 7" 7
+assert_out_has "post-rebase validate names both notes" "cycles/C-0004-b/C-0004.md"
+
+run cycles --vault "$TWB" cycle reconcile --json
+assert_rc "post-rebase reconcile renumbers the loser" 0
+assert_out_has "post-rebase reconcile from C-0004" '"from": "C-0004"'
+assert_out_has "post-rebase reconcile to C-0005" '"to": "C-0005"'
+assert_file "loser renumbered to the deterministic path" "$TWB/Cycles/cycles/C-0005/C-0005.md"
+
+run cycles --vault "$TWB" cycle validate
+assert_rc "post-rebase validate 0" 0
+
+tw_git "$TWB" add -A
+tw_git "$TWB" commit -qm "devB: reconcile C-0004 duplicate → C-0005"
+tw_git "$TWB" push -q origin main
+assert_rc "devB push after reconcile" 0
+
+tw_git "$TWA" pull -q --rebase origin main
+assert_file "devA pulls the renumbered cycle" "$TWA/Cycles/cycles/C-0005/C-0005.md"
+run cycles --vault "$TWA" cycle validate
+assert_rc "devA validates clean after the merge" 0
 
 # ---------------------------------------------------------------------------
 section "summary"

@@ -1,6 +1,6 @@
 # Orbit CLI — Complete Command Reference
 
-**Version:** v0.2.0 · **Registry:** neocortex 0.7.0 · cycles 0.1.0
+**Version:** v0.2.0 · **Registry:** neocortex 0.7.0 · cycles 0.1.5
 
 Every command, every operand, every flag. For the narrative of what changed
 from v0.1.0, see the changelog section at the bottom.
@@ -443,6 +443,19 @@ by default** — the only network-touching verbs are `work sync` and
 `cycle sync`, which mirror bets/cycles to GitHub/GitLab issues and milestones
 via the `gh`/`glab` CLIs.
 
+**Shared vault / git loop.** The vault is a **git repository each developer
+clones** (`vault.dir` points at the clone); Markdown is the source of truth and
+the forge stays a mirror. The CLI itself is offline and **never runs git or
+pushes** — the multi-writer loop is the agent's job: `git pull --rebase` →
+`orbit cycles cycle validate` (→ `cycle reconcile` on a duplicate → re-validate)
+→ allocate the id → write → commit → **ask the human** → `git push` (a rejected
+non-fast-forward push rebases, re-validates, and retries). Work ids are
+owner-namespaced: the CLI resolves the local handle from the clone's git
+identity (`git config user.name` / `user.email`) against `Cycles/developers.yml`
+(email first, then name). `CURRENT` is a local, gitignored pointer validated
+against the shared ledger — a pointer to a missing or `Closed` cycle auto-clears
+with a notice.
+
 Lifecycle: work `Backlog → Pitched → Bet → Delivered` (`Shelved` reachable from
 the pre-bet/bet stages; `unshelve` returns to `Pitched`); cycles `Open →
 Closed`. Illegal moves are `state_conflict` (7). Files move only across the
@@ -469,16 +482,19 @@ orbit cycles init --vault ~/orbit-vault     # explicit vault root
 
 ### `work new "<title>" --scope <s>`
 
-Create a `W-####` work item in `backlog/` as `Backlog`.
+Create a `W-<seq>-<owner-slug>` work item in `backlog/` as `Backlog`. The id is
+owner-namespaced (per-owner sequence + the resolved handle), and the frontmatter
+records `owner:` / `owner_name:`.
 
 | Flag | Type | Meaning |
 |---|---|---|
 | `--scope` | string | project surface (required; e.g. `delijan-driver-app`) |
 
-Preflight: title + scope non-empty (exit 6); vault initialized (exit 11).
+Preflight: title + scope non-empty (exit 6); vault initialized (exit 11); the
+roster must resolve the local handle from the clone's git identity (exit 6).
 Exit codes: 0 · 2 · 4 · 6 · 10 · 11.
 
-### `work shape <W-####> --appetite big|small`
+### `work shape <W-####-<owner-slug>> --appetite big|small`
 
 `Backlog → Pitched`, stamping the appetite.
 
@@ -490,11 +506,24 @@ Preflight: item is `Backlog` (else exit 7); appetite valid (exit 6); the
 `## Problem` and `## Solution Sketch` sections are both non-empty (exit 6).
 Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
 
-### `work bet|shelve|unshelve|deliver <W-####>`
+### `work bet <W-####-<owner-slug>> --assignee <handle>[,<handle>]`
+
+`Pitched → Bet`: moves the item into the open cycle and stamps its
+`assignees:` set (roster handles; set at bet, per the ownership model).
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--assignee` | string slice | roster handle(s) to assign (comma-separated, repeatable; **required**) |
+
+Preflight: item is `Pitched` (else exit 7); a current cycle is open (else exit
+7); at least one assignee is required and every handle must exist in the roster
+(exit 6).
+Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
+
+### `work shelve|unshelve|deliver <W-####-<owner-slug>>`
 
 | Verb | Transition | Preflight |
 |---|---|---|
-| `bet` | `Pitched → Bet` (moves into `cycles/C-####/`) | item is `Pitched`; a current cycle is open (else exit 7) |
 | `shelve` | `Backlog`/`Pitched`/`Bet` → `Shelved` (returns to `backlog/` if committed) | legal source status (else exit 7) |
 | `unshelve` | `Shelved → Pitched` | item is `Shelved` (else exit 7) |
 | `deliver` | `Bet → Delivered` (terminal; stays in the cycle folder) | item is `Bet` (else exit 7); human-only by convention |
@@ -503,19 +532,19 @@ Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
 
 ### `work list [--status <s>] [--scope <s>]`
 
-Table `ID · TITLE · STATUS · SCOPE · CYCLE` over `backlog/` and every cycle.
-`--status` is case-insensitive; `--scope` is an exact match. `--json` emits the
-typed slice.
+Table `ID · TITLE · STATUS · SCOPE · CYCLE` over `backlog/` and every cycle; the
+`ID` column carries the composite `W-<seq>-<owner-slug>`. `--status` is
+case-insensitive; `--scope` is an exact match. `--json` emits the typed slice.
 
 Exit codes: 0 · 2 · 6 · 10.
 
-### `work show <W-####>`
+### `work show <W-####-<owner-slug>>`
 
 Human output prints the note verbatim; `--json` emits the typed `WorkItem`.
 
 Exit codes: 0 · 2 · 5 · 6 · 10.
 
-### `work sync <W-####> [--project <dir>]`
+### `work sync <W-####-<owner-slug>> [--project <dir>]`
 
 **Network verb.** Create or update the git issue for a **Bet** and assign it to
 the open cycle's milestone. Shells out to the `gh` (GitHub) or `glab` (GitLab)
@@ -528,24 +557,31 @@ CLI and reuses the operator's existing login.
 Preflight: the item must be `Bet` (else exit 7). The target repo is derived
 from the project's git `origin` remote; the project comes from `--project` when
 given, else the note's `project:` — a Bet with neither is exit 6. A
-missing/unauthenticated forge CLI is exit 1. On first run the issue is created;
-every later run updates and re-assigns in place (idempotent). `work sync` never
-mints a milestone: if the bet's repo has no recorded milestone it is exit 7
-pointing at `orbit cycles cycle sync`.
+missing/unauthenticated forge CLI is exit 1. The stored `assignees:` handles are
+mapped to the repo's provider via the roster (handle → `github`/`gitlab`
+username) and set as the issue's assignees — the visible claim that prevents
+double-pickup; an empty stored list, an unknown handle, or a handle with no
+username for the provider is exit 6. On first run the issue is created; every
+later run updates and re-assigns in place (idempotent). `work sync` never mints
+a milestone: if the bet's repo has no recorded milestone it is exit 7 pointing
+at `orbit cycles cycle sync`.
 
 Exit codes: 0 · 1 · 2 · 3 · 5 · 6 · 7 · 10.
 
 ```sh
-orbit cycles work sync W-0003
-orbit cycles work sync W-0003 --project ../orbit
-orbit cycles work sync W-0003 --json
+orbit cycles work sync W-0003-arash-jafarpour
+orbit cycles work sync W-0003-arash-jafarpour --project ../orbit
+orbit cycles work sync W-0003-arash-jafarpour --json
 ```
 
 ## `orbit cycles cycle` — cycles
 
 ### `cycle new "<goal>" --release <semver> [--start <date>] [--end <date>]`
 
-Open the next `C-####` cycle and point `CURRENT` at it.
+Open the next `C-####` cycle and point `CURRENT` at it. `created_by:` records
+the creator; teammates subscribe via `subscribers:`. The note path is
+deterministically `cycles/C-####/C-####.md` (id in the directory and the
+filename, no slug).
 
 | Flag | Type | Meaning |
 |---|---|---|
@@ -555,6 +591,9 @@ Open the next `C-####` cycle and point `CURRENT` at it.
 
 Preflight: goal non-empty (exit 6); valid release (exit 6); vault initialized
 (exit 11); no cycle already open (exit 7); valid dates, end ≥ start (exit 6).
+The id is allocated only after a clean post-pull vault: an existing or
+duplicate `C-####` is `state_conflict` (7) with a `git pull --rebase` hint
+(reconcile with `orbit cycles cycle reconcile`).
 Exit codes: 0 · 2 · 4 · 6 · 7 · 10 · 11.
 
 ### `cycle close`
@@ -565,6 +604,29 @@ marked `Closed`, and `CURRENT` is cleared. Human-only by convention.
 
 Preflight: a cycle is open and not already `Closed` (else exit 7).
 Exit codes: 0 · 2 · 5 · 6 · 7 · 10.
+
+### `cycle validate`
+
+Scan `cycles/` for two or more notes sharing a leading `C-####` token — the
+post-pull/rebase backstop. Directory names are containers and are never counted,
+so the canonical `cycles/C-0007/C-0007.md` is one cycle. Read-only and offline.
+
+Exits 0 with `cycle ids ok (N cycles)` on a clean vault, or `state_conflict`
+(7) naming every file when an id is duplicated. `--json` emits the typed
+`{ok, duplicates:[{id, paths}]}`.
+Exit codes: 0 · 2 · 7 · 10.
+
+### `cycle reconcile`
+
+Resolve duplicate leading `C-####` ids (see `cycle validate`): for each
+duplicate group the **later-minted** note — the greater `(created:, created_by:)`
+tuple — loses and is renumbered to the next free id (folder + note move to
+`cycles/C-<new>/C-<new>.md`, `id:` rewritten, one `history` line appended).
+`CURRENT` is left untouched. Offline; never pushes.
+
+Exits 0 reporting each renumber (`renumbered C-#### → C-<new> (<path>)`), or
+`no duplicates`. `--json` emits `{renumbered:[{from, to, path}]}`.
+Exit codes: 0 · 2 · 6 · 7 · 10.
 
 ### `cycle list`
 
@@ -585,6 +647,9 @@ Exit codes: 0 · 2 · 5 · 6 · 10.
 cycle's bets (title `C-#### — <goal>`, due = the cycle's `end`) and record each
 number in the cycle's `milestone` map. Shells out to `gh`/`glab` and reuses the
 operator's existing login. Accepts `--json`.
+
+Only the cycle **creator** runs `cycle sync`; everyone else's `work sync`
+consumes the milestone numbers already recorded in the shared note.
 
 Preflight: a cycle must be open (else exit 7). Repos come from each bet's
 `project:`; a bet with no project is reported and skipped. A repo whose
@@ -620,9 +685,11 @@ Exit codes: 0 · 2 · 3 · 5 · 10.
 | `orbit cycles` (group + all subcommands) | `--vault <dir>` (persistent) |
 | `orbit cycles work new` | `--scope <s>` (required) |
 | `orbit cycles work shape` | `--appetite big\|small` (required) |
+| `orbit cycles work bet` | `--assignee <handle>[,<handle>]` (required) |
 | `orbit cycles work list` | `--status <s>`, `--scope <s>` |
 | `orbit cycles work sync` | `--project <dir>`, `--json` |
 | `orbit cycles cycle new` | `--release <semver>` (required), `--start <date>`, `--end <date>` |
+| `orbit cycles cycle validate` / `reconcile` | `--json` |
 | `orbit cycles cycle sync` | `--json` |
 | `orbit cycles work show` / `cycle show` | `--json` |
 | all other commands | operands only (+ global flags) |
@@ -657,17 +724,21 @@ orbit neocortex issue ingest spec.md "Add streaming API"
 
 # Cycles (planning & commitment)
 orbit cycles install                                          # bootstrap <vault.dir>/Cycles/
+git -C ~/.orbit-vault pull --rebase                           # 1. sync the shared clone
+orbit cycles cycle validate                                   # 2. post-pull duplicate backstop
 orbit cycles work new "Voice search" --scope delijan-driver-app
-orbit cycles work shape W-0001 --appetite small              # after filling the shape sections
+orbit cycles work shape W-0001-arash-jafarpour --appetite small   # after filling the shape sections
 orbit cycles cycle new "Driver search hardening" --release 0.3.0
-orbit cycles work bet W-0001
+orbit cycles work bet W-0001-arash-jafarpour --assignee arash-jafarpour
+git -C ~/.orbit-vault add -A && git -C ~/.orbit-vault commit -m "cycle: bet W-0001-arash-jafarpour"
+# … then ASK the human before pushing (commit-only vs commit-and-push). The CLI never pushes.
 orbit cycles cycle sync                                      # network: mint one milestone per distinct repo
-orbit cycles work sync W-0001 --project ~/dev/delijan-app    # network: Bet issue → assigned to its milestone
-orbit cycles work deliver W-0001                             # human-only
+orbit cycles work sync W-0001-arash-jafarpour --project ~/dev/delijan-app  # network: Bet issue → milestone + assignees
+orbit cycles work deliver W-0001-arash-jafarpour             # human-only
 orbit cycles work new "Offline mode" --scope delijan-driver-app
-orbit cycles work shape W-0002 --appetite big
-orbit cycles work bet W-0002
-orbit cycles cycle close                                     # W-0002 → backlog/ (Shelved); CURRENT cleared
+orbit cycles work shape W-0002-arash-jafarpour --appetite big
+orbit cycles work bet W-0002-arash-jafarpour --assignee arash-jafarpour
+orbit cycles cycle close                                     # W-0002-arash-jafarpour → backlog/ (Shelved); CURRENT cleared
 orbit cycles status --json                                   # board: current cycle + backlog ladder
 
 # Housekeeping
