@@ -71,7 +71,7 @@ func TestCyclesWorkSyncNonBet(t *testing.T) {
 	if _, _, err := runCycles(t, env.cfgPath, "cycles", "work", "new", "Backlog item", "--scope", "app", "--json"); err != nil {
 		t.Fatalf("work new: %v", err)
 	}
-	_, _, err := runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001")
+	_, _, err := runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001-arash-jafarpour")
 	wantCode(t, err, exit.StateConflict)
 }
 
@@ -79,20 +79,20 @@ func TestCyclesWorkSyncNonBet(t *testing.T) {
 // resolve a repo, so it is a preflight_failed (6) — still fully offline.
 func TestCyclesWorkSyncNoProject(t *testing.T) {
 	env := setupCyclesCmd(t)
-	mustCyclesWork(t, env.cfgPath, "No project", "app") // W-0001 Pitched
+	mustCyclesWork(t, env.cfgPath, "No project", "app") // W-0001-arash-jafarpour Pitched
 
 	if _, _, err := runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Ship the beta", "--release", "0.3.0", "--json"); err != nil {
 		t.Fatalf("cycle new: %v", err)
 	}
-	if _, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001", "--json"); err != nil {
+	if _, _, err := runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--json"); err != nil {
 		t.Fatalf("work bet: %v", err)
 	}
 
-	_, _, err := runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001")
+	_, _, err := runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001-arash-jafarpour")
 	wantCode(t, err, exit.PreflightFailed)
 
 	// An explicit empty --project behaves the same (still no repo).
-	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001", "--project", "")
+	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "sync", "W-0001-arash-jafarpour", "--project", "")
 	wantCode(t, err, exit.PreflightFailed)
 }
 

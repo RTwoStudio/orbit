@@ -20,16 +20,19 @@ func newCyclesWorkCmd() *cobra.Command {
   Backlog → Pitched → Bet → Delivered, with Shelved reachable from the
   pre-bet/bet stages; unshelve returns a Shelved item to Pitched.
 
+Work ids are owner-namespaced: W-<seq>-<owner-slug> (e.g.
+W-0001-arash-jafarpour). A legacy bare W-#### still resolves read-only.
+
 Subcommands:
   new "<title>" --scope <s>                Capture a Backlog item
-  shape <W-####> --appetite big|small      Backlog → Pitched (needs filled shape)
-  bet <W-####>                             Pitched → Bet into the open cycle
-  shelve <W-####>                          Park an item (→ Shelved)
-  unshelve <W-####>                        Shelved → Pitched
-  deliver <W-####>                         Bet → Delivered (terminal)
-  sync <W-####> [--project <dir>]          Sync a Bet's issue to the forge (network)
+  shape <W-####-<owner-slug>> --appetite big|small   Backlog → Pitched (needs filled shape)
+  bet <W-####-<owner-slug>>                Pitched → Bet into the open cycle
+  shelve <W-####-<owner-slug>>             Park an item (→ Shelved)
+  unshelve <W-####-<owner-slug>>           Shelved → Pitched
+  deliver <W-####-<owner-slug>>            Bet → Delivered (terminal)
+  sync <W-####-<owner-slug>> [--project <dir>]   Sync a Bet's issue to the forge (network)
   list [--status <s>] [--scope <s>]        Table of work items (--json)
-  show <W-####>                            Print the work note (--json)
+  show <W-####-<owner-slug>>               Print the work note (--json)
 
 Exit codes:
   0 ok  2 usage  3 config_error  4 registry_unreachable  5 not_found
@@ -63,10 +66,13 @@ func newCyclesWorkNewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `new "<title>" --scope <scope>`,
 		Short: "Capture a new work item in the backlog (Backlog)",
-		Long: `Creates a work item in the vault's backlog/ with the next free W-#### id.
+		Long: `Creates a work item in the vault's backlog/ with the next free
+W-<seq>-<owner-slug> id for the local developer. The handle is resolved from
+the vault clone's git identity matched against Cycles/developers.yml.
 
 Preflight: title and scope must be non-empty (exit 6); the vault must be
-initialized (exit 11); the cycles registry cache must be populated (exit 4).
+initialized (exit 11); the cycles registry cache must be populated (exit 4);
+the roster must be present and the git identity must match an entry (exit 6).
 
 Exit codes: 0 ok · 2 usage · 4 registry_unreachable · 6 preflight_failed
             10 io_error · 11 not_initialized
@@ -98,7 +104,7 @@ Example:
 func newCyclesWorkShapeCmd() *cobra.Command {
 	var appetite string
 	cmd := &cobra.Command{
-		Use:   "shape <W-####> --appetite big|small",
+		Use:   "shape <W-####-<owner-slug>> --appetite big|small",
 		Short: "Move a Backlog item to Pitched (requires the shape sections)",
 		Long: `Stamps status Pitched and the chosen appetite.
 
@@ -110,7 +116,7 @@ Exit codes: 0 ok · 2 usage · 5 not_found · 6 preflight_failed
             7 state_conflict · 10 io_error
 
 Example:
-  orbit cycles work shape W-0003 --appetite small`,
+  orbit cycles work shape W-0003-arash-jafarpour --appetite small`,
 		Args:         usageArgs(cobra.ExactArgs(1)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -161,7 +167,7 @@ func newCyclesWorkDeliverCmd() *cobra.Command {
 // id, applies the Store method, and renders the resulting *WorkItem.
 func newCyclesWorkVerbCmd(verb, short, preflight string, method func(*cycles.Store, string) (*cycles.WorkItem, error)) *cobra.Command {
 	return &cobra.Command{
-		Use:   verb + " <W-####>",
+		Use:   verb + " <W-####-<owner-slug>>",
 		Short: short,
 		Long: preflight + `
 
@@ -169,7 +175,7 @@ Exit codes: 0 ok · 2 usage · 5 not_found · 6 preflight_failed
             7 state_conflict · 10 io_error
 
 Example:
-  orbit cycles work ` + verb + ` W-0003`,
+  orbit cycles work ` + verb + ` W-0003-arash-jafarpour`,
 		Args:         usageArgs(cobra.ExactArgs(1)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -232,15 +238,15 @@ Example:
 
 func newCyclesWorkShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <W-####>",
+		Use:   "show <W-####-<owner-slug>>",
 		Short: "Print the full work note",
 		Long: `Human output prints the work note verbatim (its markdown is the artifact);
---json emits the typed WorkItem.
+--json emits the typed WorkItem. A legacy bare W-#### is accepted read-only.
 
 Exit codes: 0 ok · 2 usage · 5 not_found · 6 preflight_failed · 10 io_error
 
 Example:
-  orbit cycles work show W-0003 --json`,
+  orbit cycles work show W-0003-arash-jafarpour --json`,
 		Args:         usageArgs(cobra.ExactArgs(1)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -268,11 +274,12 @@ Example:
 }
 
 // printWorkTable renders the aligned ID | TITLE | STATUS | SCOPE | CYCLE table.
+// The ID column is wide enough for a composite owner-namespaced id.
 func printWorkTable(out io.Writer, items []cycles.WorkItem) {
-	fmt.Fprintf(out, "%-7s %-32s %-10s %-22s %s\n",
+	fmt.Fprintf(out, "%-30s %-32s %-10s %-22s %s\n",
 		"ID", "TITLE", "STATUS", "SCOPE", "CYCLE")
 	for _, it := range items {
-		fmt.Fprintf(out, "%-7s %-32s %-10s %-22s %s\n",
+		fmt.Fprintf(out, "%-30s %-32s %-10s %-22s %s\n",
 			it.ID, truncate(it.Title, 30), it.Status, truncate(it.Scope, 20), it.Cycle)
 	}
 }

@@ -12,15 +12,15 @@ func TestStatusBoardWithCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.NewWork("Alpha", "scope-a"); err != nil { // W-0001 Backlog
+	if _, err := s.NewWork("Alpha", "scope-a"); err != nil { // W-0001-arash-jafarpour Backlog
 		t.Fatal(err)
 	}
-	mustWork(t, s, "Beta", "scope-a", false) // W-0002 Pitched
+	mustWork(t, s, "Beta", "scope-a", false) // W-0002-arash-jafarpour Pitched
 	it3 := mustWork(t, s, "Gamma", "scope-a", false)
-	if _, err := s.ShelveWork(it3.ID); err != nil { // W-0003 Shelved
+	if _, err := s.ShelveWork(it3.ID); err != nil { // W-0003-arash-jafarpour Shelved
 		t.Fatal(err)
 	}
-	mustWork(t, s, "Delta", "scope-a", true) // W-0004 Bet
+	mustWork(t, s, "Delta", "scope-a", true) // W-0004-arash-jafarpour Bet
 
 	board, err := s.Status()
 	if err != nil {
@@ -29,17 +29,17 @@ func TestStatusBoardWithCurrent(t *testing.T) {
 	if board.Current == nil || board.Current.ID != "C-0001" {
 		t.Fatalf("Current = %+v, want C-0001", board.Current)
 	}
-	if len(board.Current.Bets) != 1 || board.Current.Bets[0].ID != "W-0004" {
-		t.Errorf("Current.Bets = %+v, want [W-0004]", board.Current.Bets)
+	if len(board.Current.Bets) != 1 || board.Current.Bets[0].ID != "W-0004-arash-jafarpour" {
+		t.Errorf("Current.Bets = %+v, want [W-0004-arash-jafarpour]", board.Current.Bets)
 	}
-	if len(board.Backlog.Backlog) != 1 || board.Backlog.Backlog[0].ID != "W-0001" {
-		t.Errorf("Backlog = %+v, want [W-0001]", board.Backlog.Backlog)
+	if len(board.Backlog.Backlog) != 1 || board.Backlog.Backlog[0].ID != "W-0001-arash-jafarpour" {
+		t.Errorf("Backlog = %+v, want [W-0001-arash-jafarpour]", board.Backlog.Backlog)
 	}
-	if len(board.Backlog.Pitched) != 1 || board.Backlog.Pitched[0].ID != "W-0002" {
-		t.Errorf("Pitched = %+v, want [W-0002]", board.Backlog.Pitched)
+	if len(board.Backlog.Pitched) != 1 || board.Backlog.Pitched[0].ID != "W-0002-arash-jafarpour" {
+		t.Errorf("Pitched = %+v, want [W-0002-arash-jafarpour]", board.Backlog.Pitched)
 	}
-	if len(board.Backlog.Shelved) != 1 || board.Backlog.Shelved[0].ID != "W-0003" {
-		t.Errorf("Shelved = %+v, want [W-0003]", board.Backlog.Shelved)
+	if len(board.Backlog.Shelved) != 1 || board.Backlog.Shelved[0].ID != "W-0003-arash-jafarpour" {
+		t.Errorf("Shelved = %+v, want [W-0003-arash-jafarpour]", board.Backlog.Shelved)
 	}
 }
 

@@ -9,19 +9,31 @@ import (
 )
 
 func TestParseWorkID(t *testing.T) {
-	valid := []string{"W-0001", "W-1234", "W-99999", " W-0001 "}
-	for _, id := range valid {
-		got, err := ParseWorkID(id)
+	valid := []struct{ in, want string }{
+		{"W-0001-arash-jafarpour", "W-0001-arash-jafarpour"},
+		{" W-0001-arash-jafarpour ", "W-0001-arash-jafarpour"},
+		{"W-99999-seyed-mahdi-rostami", "W-99999-seyed-mahdi-rostami"},
+		// Legacy bare ids are accepted read-only.
+		{"W-0001", "W-0001"},
+		{" W-1234 ", "W-1234"},
+	}
+	for _, tc := range valid {
+		got, err := ParseWorkID(tc.in)
 		if err != nil {
-			t.Errorf("ParseWorkID(%q): %v", id, err)
+			t.Errorf("ParseWorkID(%q): %v", tc.in, err)
 			continue
 		}
-		if got != "W-0001" && got != "W-1234" && got != "W-99999" {
-			t.Errorf("ParseWorkID(%q) = %q", id, got)
+		if got != tc.want {
+			t.Errorf("ParseWorkID(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 
-	invalid := []string{"", "W-001", "W-1", "W-abcd", "C-0001", "w-0001", "0001", "W-0001x", "W 0001"}
+	invalid := []string{
+		"", "W-001", "W-1", "W-abcd", "C-0001", "0001", "W-0001x", "W 0001",
+		// Composite grammar faults.
+		"w-0001-arash-jafarpour", "W-0001-", "W-0001-Arash", "W-0001-arash_jafarpour",
+		"W-0001--arash", "W-arash-jafarpour",
+	}
 	for _, id := range invalid {
 		_, err := ParseWorkID(id)
 		if err == nil {
@@ -30,6 +42,21 @@ func TestParseWorkID(t *testing.T) {
 		}
 		if codeOf(t, err) != exit.PreflightFailed {
 			t.Errorf("ParseWorkID(%q) code = %v, want preflight_failed", id, codeOf(t, err))
+		}
+	}
+}
+
+func TestWorkIDFromFilename(t *testing.T) {
+	cases := map[string]string{
+		"W-0001-arash-jafarpour - voice-search.md": "W-0001-arash-jafarpour",
+		"W-0001-arash-jafarpour.md":                "W-0001-arash-jafarpour",
+		"W-0001 - voice-search.md":                 "W-0001",
+		"W-0001.md":                                "W-0001",
+		"W-0001-arash-jafarpour - a - b.md":        "W-0001-arash-jafarpour",
+	}
+	for name, want := range cases {
+		if got := workIDFromFilename(name); got != want {
+			t.Errorf("workIDFromFilename(%q) = %q, want %q", name, got, want)
 		}
 	}
 }
@@ -44,42 +71,151 @@ func writeRaw(t *testing.T, path string) {
 
 func TestNextWorkIDSingle(t *testing.T) {
 	s := setupVault(t)
-	id, err := s.NextWorkID()
+	id, err := s.NextWorkID(testOwnerHandle)
 	if err != nil {
 		t.Fatalf("NextWorkID: %v", err)
 	}
-	if id != "W-0001" {
-		t.Errorf("empty vault next id = %q, want W-0001", id)
+	if want := "W-0001-" + testOwnerHandle; id != want {
+		t.Errorf("empty vault next id = %q, want %q", id, want)
+	}
+}
+
+func TestNextWorkIDPerOwner(t *testing.T) {
+	s := setupVault(t)
+	// Two owners mint in their own namespaces; neither advances the other.
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - a.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0002-arash-jafarpour - b.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0009-seyed-mahdi-rostami - c.md"))
+
+	got, err := s.NextWorkID("arash-jafarpour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "W-0003-arash-jafarpour"; got != want {
+		t.Errorf("NextWorkID(arash) = %q, want %q", got, want)
+	}
+
+	other, err := s.NextWorkID("seyed-mahdi-rostami")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "W-0010-seyed-mahdi-rostami"; other != want {
+		t.Errorf("NextWorkID(seyed) = %q, want %q", other, want)
 	}
 }
 
 func TestNextWorkIDScansBacklogAndCycles(t *testing.T) {
 	s := setupVault(t)
-	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0001 - a.md"))
-	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0003 - c.md"))
-	writeRaw(t, filepath.Join(s.CycleDir("C-0007"), "W-0007 - g.md"))
-	// Non-work files are ignored.
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - a.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0003-arash-jafarpour - c.md"))
+	writeRaw(t, filepath.Join(s.CycleDir("C-0007"), "W-0007-arash-jafarpour - g.md"))
+	// Non-work files, other owners, and legacy bare ids are ignored.
 	writeRaw(t, filepath.Join(s.BacklogDir(), "notes.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0042-seyed-mahdi-rostami - other.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0099 - legacy.md"))
 
-	id, err := s.NextWorkID()
+	id, err := s.NextWorkID("arash-jafarpour")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "W-0008" {
-		t.Errorf("NextWorkID = %q, want W-0008", id)
+	if want := "W-0008-arash-jafarpour"; id != want {
+		t.Errorf("NextWorkID = %q, want %q", id, want)
 	}
 }
 
 func TestNextWorkIDNeverReusesDelivered(t *testing.T) {
 	s := setupVault(t)
-	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0002 - b.md"))
-	writeRaw(t, filepath.Join(s.CycleDir("C-0001"), "W-0005 - delivered.md"))
+	writeRaw(t, filepath.Join(s.BacklogDir(), "W-0002-arash-jafarpour - b.md"))
+	writeRaw(t, filepath.Join(s.CycleDir("C-0001"), "W-0005-arash-jafarpour - delivered.md"))
 
-	id, err := s.NextWorkID()
+	id, err := s.NextWorkID("arash-jafarpour")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "W-0006" {
-		t.Errorf("NextWorkID = %q, want W-0006 (delivered ids are never reused)", id)
+	if want := "W-0006-arash-jafarpour"; id != want {
+		t.Errorf("NextWorkID = %q, want %q (delivered ids are never reused)", id, want)
+	}
+}
+
+func TestNextWorkIDEmptyOwner(t *testing.T) {
+	s := setupVault(t)
+	if _, err := s.NextWorkID("  "); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("empty owner code = %v, want preflight_failed", codeOf(t, err))
+	}
+}
+
+func TestFindWorkComposite(t *testing.T) {
+	s := setupVault(t)
+	composite := filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - alpha.md")
+	writeRaw(t, composite)
+
+	got, err := s.FindWork("W-0001-arash-jafarpour")
+	if err != nil {
+		t.Fatalf("FindWork composite: %v", err)
+	}
+	if got != composite {
+		t.Errorf("FindWork = %q, want %q", got, composite)
+	}
+
+	if _, err := s.FindWork("W-0001-Arash"); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("malformed id code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.FindWork("W-0099-arash-jafarpour"); codeOf(t, err) != exit.NotFound {
+		t.Errorf("absent composite code = %v, want not_found", codeOf(t, err))
+	}
+}
+
+func TestFindWorkLegacyReadCompat(t *testing.T) {
+	s := setupVault(t)
+	legacy := filepath.Join(s.BacklogDir(), "W-0001 - legacy.md")
+	writeRaw(t, legacy)
+
+	// A bare W-#### resolves the legacy note.
+	got, err := s.FindWork("W-0001")
+	if err != nil {
+		t.Fatalf("FindWork legacy: %v", err)
+	}
+	if got != legacy {
+		t.Errorf("FindWork(legacy) = %q, want %q", got, legacy)
+	}
+
+	// A bare query also resolves a composite note for the same sequence...
+	composite := filepath.Join(s.BacklogDir(), "W-0002-arash-jafarpour - alpha.md")
+	writeRaw(t, composite)
+	got, err = s.FindWork("W-0002")
+	if err != nil {
+		t.Fatalf("FindWork bare→composite: %v", err)
+	}
+	if got != composite {
+		t.Errorf("FindWork(W-0002) = %q, want the composite %q", got, composite)
+	}
+
+	// ...and the composite wins when both exist for the same sequence.
+	both := filepath.Join(s.BacklogDir(), "W-0003 - legacy-both.md")
+	writeRaw(t, both)
+	bothComposite := filepath.Join(s.BacklogDir(), "W-0003-arash-jafarpour - composite-both.md")
+	writeRaw(t, bothComposite)
+	got, err = s.FindWork("W-0003")
+	if err != nil {
+		t.Fatalf("FindWork both: %v", err)
+	}
+	if got != bothComposite {
+		t.Errorf("FindWork(both) = %q, want the composite %q", got, bothComposite)
+	}
+
+	if _, err := s.FindWork("nope"); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("bad id code = %v, want preflight_failed", codeOf(t, err))
+	}
+}
+
+func TestFindWorkDuplicateIsConflict(t *testing.T) {
+	s := setupVault(t)
+	a := filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - a.md")
+	b := filepath.Join(s.CycleDir("C-0001"), "W-0001-arash-jafarpour - b.md")
+	writeRaw(t, a)
+	writeRaw(t, b)
+
+	if _, err := s.FindWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
+		t.Errorf("duplicate composite code = %v, want state_conflict", codeOf(t, err))
 	}
 }

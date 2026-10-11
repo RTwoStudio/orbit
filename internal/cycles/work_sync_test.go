@@ -560,7 +560,7 @@ func TestSyncWorkMissingNote(t *testing.T) {
 // TestWorkSyncReportJSONShape pins the T6 --json contract: the documented tags.
 func TestWorkSyncReportJSONShape(t *testing.T) {
 	rep := &WorkSyncReport{
-		Work:      &WorkItem{ID: "W-0001"},
+		Work:      &WorkItem{ID: "W-0001-arash-jafarpour"},
 		Provider:  "github",
 		Repo:      "RTwoStudio/orbit",
 		Issue:     1,

@@ -8,9 +8,9 @@ import "github.com/RTwoStudio/orbit/internal/scaffold"
 // these tokens (or update this registration in lockstep).
 func init() {
 	scaffold.Register("work.stub.md", []string{
-		"WORK_ID", "WORK_TITLE", "SCOPE", "DATE", "REGISTRY_VERSION",
+		"WORK_ID", "WORK_TITLE", "WORK_OWNER", "WORK_OWNER_NAME", "SCOPE", "DATE", "REGISTRY_VERSION",
 	})
 	scaffold.Register("cycle.stub.md", []string{
-		"RELEASE", "CYCLE_ID", "CYCLE_GOAL", "START_DATE", "END_DATE", "DATE", "REGISTRY_VERSION",
+		"RELEASE", "CYCLE_ID", "CYCLE_GOAL", "CREATED_BY", "START_DATE", "END_DATE", "DATE", "REGISTRY_VERSION",
 	})
 }

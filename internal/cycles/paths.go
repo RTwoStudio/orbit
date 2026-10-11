@@ -3,8 +3,9 @@
 //
 // It is vault-rooted: a Store is opened from an explicit vault root (never
 // cwd) and resolves every path under <vaultRoot>/Cycles/. It owns the work and
-// cycle status transition tables, W-####/C-#### identity allocation and
-// parsing, on-disk lookup, CURRENT read/write, the work verbs
+// cycle status transition tables, composite W-<seq>-<owner-slug>/C-####
+// identity allocation and parsing, on-disk lookup, the developer roster,
+// CURRENT read/write, the work verbs
 // new/shape/bet/shelve/unshelve/deliver plus list/show, the cycle verbs
 // new/close/list/show (including auto-shelve on close), and the status board.
 // Cobra wiring and --json rendering are out of scope (T6).
@@ -27,6 +28,11 @@ func Open(vaultRoot string) *Store {
 	return &Store{Root: filepath.Join(vaultRoot, "Cycles")}
 }
 
+// vaultRoot returns the vault root: the parent of the Cycles/ directory. It is
+// where the vault clone's git identity (and thus the local developer's handle)
+// is resolved.
+func (s *Store) vaultRoot() string { return filepath.Dir(s.Root) }
+
 // CyclesDir returns <vaultRoot>/Cycles.
 func (s *Store) CyclesDir() string { return s.Root }
 
@@ -44,12 +50,17 @@ func (s *Store) CycleDir(id string) string { return filepath.Join(s.LedgerDir(),
 // CurrentPath returns <vaultRoot>/Cycles/CURRENT, the open-cycle pointer.
 func (s *Store) CurrentPath() string { return filepath.Join(s.Root, "CURRENT") }
 
+// RosterPath returns <vaultRoot>/Cycles/developers.yml, the developer roster
+// (handle ↔ name ↔ email ↔ forge username) that owns multi-writer identity.
+func (s *Store) RosterPath() string { return filepath.Join(s.Root, "developers.yml") }
+
 // IsInitialized reports whether the vault's Cycles/ directory exists (§5.0
 // gate). T4 never creates the layout; that is `orbit cycles install` (T7).
 func (s *Store) IsInitialized() bool { return fsutil.IsDir(s.Root) }
 
-// WorkPath builds a work note's stable filename in dir: "W-#### - <slug>.md"
-// (or "W-####.md" when slug is empty).
+// WorkPath builds a work note's stable filename in dir:
+// "W-<seq>-<owner-slug> - <slug>.md" (or "<id>.md" when slug is empty). The id
+// token is passed in whole, so a legacy bare id still renders unchanged.
 func WorkPath(dir, id, slug string) string {
 	name := id + ".md"
 	if slug != "" {

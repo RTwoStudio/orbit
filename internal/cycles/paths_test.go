@@ -33,10 +33,10 @@ func TestOpenBuildsVaultPaths(t *testing.T) {
 
 func TestWorkPath(t *testing.T) {
 	dir := filepath.Join("/v", "Cycles", "backlog")
-	if got, want := WorkPath(dir, "W-0001", "voice-search"), filepath.Join(dir, "W-0001 - voice-search.md"); got != want {
+	if got, want := WorkPath(dir, "W-0001-arash-jafarpour", "voice-search"), filepath.Join(dir, "W-0001-arash-jafarpour - voice-search.md"); got != want {
 		t.Errorf("WorkPath = %q, want %q", got, want)
 	}
-	if got, want := WorkPath(dir, "W-0001", ""), filepath.Join(dir, "W-0001.md"); got != want {
+	if got, want := WorkPath(dir, "W-0001-arash-jafarpour", ""), filepath.Join(dir, "W-0001-arash-jafarpour.md"); got != want {
 		t.Errorf("WorkPath(empty slug) = %q, want %q", got, want)
 	}
 }

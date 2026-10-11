@@ -362,11 +362,11 @@ func TestSyncCycleSkipsUnresolvableBets(t *testing.T) {
 	if len(rep.Skipped) != 2 {
 		t.Fatalf("skipped = %+v, want 2", rep.Skipped)
 	}
-	if rep.Skipped[0].ID != "W-0001" || rep.Skipped[0].Reason != "no project: set" {
-		t.Errorf("skip[0] = %+v, want W-0001 no project: set", rep.Skipped[0])
+	if rep.Skipped[0].ID != "W-0001-arash-jafarpour" || rep.Skipped[0].Reason != "no project: set" {
+		t.Errorf("skip[0] = %+v, want W-0001-arash-jafarpour no project: set", rep.Skipped[0])
 	}
-	if rep.Skipped[1].ID != "W-0002" || !strings.Contains(rep.Skipped[1].Reason, "unsupported git host") {
-		t.Errorf("skip[1] = %+v, want W-0002 resolve error", rep.Skipped[1])
+	if rep.Skipped[1].ID != "W-0002-arash-jafarpour" || !strings.Contains(rep.Skipped[1].Reason, "unsupported git host") {
+		t.Errorf("skip[1] = %+v, want W-0002-arash-jafarpour resolve error", rep.Skipped[1])
 	}
 	if len(rep.Milestones) != 1 || rep.Milestones[0].Repo != "RTwoStudio/orbit" {
 		t.Errorf("milestones = %+v, want the one resolvable repo", rep.Milestones)
@@ -422,8 +422,8 @@ func TestSyncCycleCollision(t *testing.T) {
 	if len(rep.Milestones) != 1 || rep.Milestones[0].Action != SyncCreated || rep.Milestones[0].Provider != "github" {
 		t.Fatalf("milestones = %+v, want the github repo created first", rep.Milestones)
 	}
-	if len(rep.Skipped) != 1 || rep.Skipped[0].ID != "W-0002" || rep.Skipped[0].Reason != "milestone map key collision" {
-		t.Fatalf("skipped = %+v, want W-0002 collision", rep.Skipped)
+	if len(rep.Skipped) != 1 || rep.Skipped[0].ID != "W-0002-arash-jafarpour" || rep.Skipped[0].Reason != "milestone map key collision" {
+		t.Fatalf("skipped = %+v, want W-0002-arash-jafarpour collision", rep.Skipped)
 	}
 	show, err := s.ShowCycle("C-0001")
 	if err != nil {

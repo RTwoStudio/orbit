@@ -40,8 +40,9 @@ type WorkSyncReport struct {
 // state_conflict (7) pointing at `orbit cycles cycle sync` (SyncWork never
 // mints milestones).
 //
-// The issue title is `W-#### — <title>` (U+2014) and the body is the note's
-// Problem + Solution Sketch with HTML comments stripped. The forge links are
+// The issue title is `<composite-id> — <title>` (U+2014) and the body is the
+// note's Problem + Solution Sketch with HTML comments stripped. The forge links
+// are
 // persisted before AssignIssue, so an assignment failure can never orphan a
 // created issue; a retry updates in place. A non-empty override is persisted
 // into `project:`.

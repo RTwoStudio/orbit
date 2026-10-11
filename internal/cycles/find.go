@@ -10,7 +10,9 @@ import (
 )
 
 // workFiles returns every candidate work-note path under backlog/ and every
-// cycles/C-*/ directory. Missing directories are tolerated (empty result).
+// cycles/C-*/ directory. A candidate is any .md file whose leading ID token is
+// a canonical composite id or a legacy bare id. Missing directories are
+// tolerated (empty result).
 func (s *Store) workFiles() ([]string, error) {
 	var out []string
 	collect := func(dir string) error {
@@ -25,7 +27,7 @@ func (s *Store) workFiles() ([]string, error) {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
-			if !workIDRe.MatchString(workIDFromFilename(e.Name())) {
+			if !isWorkID(workIDFromFilename(e.Name())) {
 				continue
 			}
 			out = append(out, filepath.Join(dir, e.Name()))
@@ -53,11 +55,14 @@ func (s *Store) workFiles() ([]string, error) {
 	return out, nil
 }
 
-// FindWork resolves a W-#### to its on-disk path wherever it lives (backlog/
-// or any cycles/C-*/). The filename is stable after creation, so matching is
-// by the leading ID token, never the full filename.
+// FindWork resolves a work id to its on-disk path wherever it lives (backlog/
+// or any cycles/C-*/). The filename is stable after creation, so matching is by
+// the leading ID token, never the full filename.
 //
-// 0 matches → not_found (5); >1 → state_conflict (7).
+// A composite id resolves its exact composite token. A legacy bare `W-####`
+// resolves a legacy note; when the vault also holds a composite note with the
+// same sequence, the composite wins (read-compat for a partially migrated
+// vault). 0 matches → not_found (5); >1 → state_conflict (7).
 func (s *Store) FindWork(id string) (string, error) {
 	id, err := ParseWorkID(id)
 	if err != nil {
@@ -67,11 +72,28 @@ func (s *Store) FindWork(id string) (string, error) {
 	if err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot scan cycles dirs")
 	}
-	var matches []string
+	_, qOwner, _ := workIDSplit(id)
+	bare := qOwner == ""
+
+	var composite, legacy []string
 	for _, p := range files {
-		if workIDFromFilename(filepath.Base(p)) == id {
-			matches = append(matches, p)
+		tok := workIDFromFilename(filepath.Base(p))
+		switch {
+		case tok == id:
+			if workIDOwner(tok) != "" {
+				composite = append(composite, p)
+			} else {
+				legacy = append(legacy, p)
+			}
+		case bare && workIDOwner(tok) != "" && strings.HasPrefix(tok, id+"-"):
+			// A bare legacy query also resolves a composite note minted for the
+			// same sequence; the composite takes precedence over any legacy note.
+			composite = append(composite, p)
 		}
+	}
+	matches := composite
+	if len(matches) == 0 {
+		matches = legacy
 	}
 	switch len(matches) {
 	case 0:

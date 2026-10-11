@@ -12,7 +12,7 @@ import (
 func newCyclesWorkSyncCmd() *cobra.Command {
 	var project string
 	cmd := &cobra.Command{
-		Use:   "sync <W-####> [--project <dir>]",
+		Use:   "sync <W-####-<owner-slug>> [--project <dir>]",
 		Short: "Sync a Bet's issue to the forge (network)",
 		Long: `Create or update the git issue for a Bet and assign it to the open cycle's
 milestone. This is the one network-touching work verb: it shells out to the
@@ -30,8 +30,8 @@ Exit codes:
   10 io_error
 
 Example:
-  orbit cycles work sync W-0003
-  orbit cycles work sync W-0003 --project ../orbit`,
+  orbit cycles work sync W-0003-arash-jafarpour
+  orbit cycles work sync W-0003-arash-jafarpour --project ../orbit`,
 		Args:         usageArgs(cobra.ExactArgs(1)),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

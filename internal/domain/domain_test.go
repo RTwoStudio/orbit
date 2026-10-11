@@ -61,7 +61,7 @@ func TestCyclesPaths(t *testing.T) {
 
 func TestCyclesStubTokensRegistered(t *testing.T) {
 	if err := scaffold.ValidateStub("work.stub.md", []byte(
-		"{{WORK_ID}} {{WORK_TITLE}} {{SCOPE}} {{DATE}} {{REGISTRY_VERSION}}")); err != nil {
+		"{{WORK_ID}} {{WORK_TITLE}} {{WORK_OWNER}} {{WORK_OWNER_NAME}} {{SCOPE}} {{DATE}} {{REGISTRY_VERSION}}")); err != nil {
 		t.Errorf("work stub rejected: %v", err)
 	}
 	if err := scaffold.ValidateStub("cycle.stub.md", []byte(

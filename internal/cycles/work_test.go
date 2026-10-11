@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +18,23 @@ import (
 
 const testRegistryVersion = "0.1.0"
 
+// The test roster's single developer. Every composite work id minted by the
+// test vault is W-<seq>-<testOwnerHandle>.
+const (
+	testOwnerHandle = "arash-jafarpour"
+	testOwnerName   = "Arash Jafarpour"
+	testOwnerEmail  = "arash@example.com"
+)
+
+// testRoster is a one-entry roster whose email/name match the vault clone's git
+// identity configured by setupVault.
+const testRoster = "# test roster\n" +
+	testOwnerHandle + ":\n" +
+	"  name: " + testOwnerName + "\n" +
+	"  email: " + testOwnerEmail + "\n" +
+	"  github: arashjf\n" +
+	"  gitlab: arashjf\n"
+
 // workStubFixture mirrors orbit-registry/cycles/stubs/work.stub.md: exactly
 // the five registered tokens, the CLI-owned frontmatter fields, and shape
 // sections whose only content is an <!-- Agent --> comment (so the shape
@@ -24,6 +42,8 @@ const testRegistryVersion = "0.1.0"
 const workStubFixture = `---
 id: {{WORK_ID}}
 title: "{{WORK_TITLE}}"
+owner: {{WORK_OWNER}}
+owner_name: "{{WORK_OWNER_NAME}}"
 scope: {{SCOPE}}
 status: Backlog
 appetite:
@@ -95,7 +115,8 @@ func writeFixtureRegistry(t *testing.T, root string) {
 }
 
 // setupVault isolates $HOME, primes the cycles cache from a fixture registry,
-// and returns an initialized Store over a fresh temp vault.
+// and returns an initialized Store over a fresh temp vault carrying the test
+// roster and a matching git identity.
 func setupVault(t *testing.T) *Store {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -115,7 +136,40 @@ func setupVault(t *testing.T) *Store {
 	if err := fsutil.EnsureDir(s.LedgerDir()); err != nil {
 		t.Fatal(err)
 	}
+	seedTestRoster(t, s)
 	return s
+}
+
+// seedTestRoster writes the test roster and gives the vault clone a matching
+// git identity, so ResolveHandle succeeds. It skips when git is unavailable.
+func seedTestRoster(t *testing.T, s *Store) {
+	t.Helper()
+	if err := fsutil.AtomicWrite(s.RosterPath(), []byte(testRoster), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setGitIdentity(t, s.vaultRoot())
+}
+
+// setGitIdentity initializes the vault clone with the test developer's local
+// git identity. Tests skip when git is not installed.
+func setGitIdentity(t *testing.T, dir string) {
+	t.Helper()
+	setGitIdentityAs(t, dir, testOwnerName, testOwnerEmail)
+}
+
+// gitAvailable reports whether the git binary is on PATH.
+func gitAvailable() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
+// runGit runs a git subcommand in dir and fails the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }
 
 // setCurrent opens cycle id in the vault: creates cycles/<id>/ and writes
@@ -194,8 +248,8 @@ func TestNewWorkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWork: %v", err)
 	}
-	if item.ID != "W-0001" {
-		t.Errorf("id = %q, want W-0001", item.ID)
+	if item.ID != "W-0001-arash-jafarpour" {
+		t.Errorf("id = %q, want W-0001-arash-jafarpour", item.ID)
 	}
 	if item.Status != "Backlog" {
 		t.Errorf("status = %q, want Backlog", item.Status)
@@ -215,7 +269,7 @@ func TestNewWorkLifecycle(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, item.Created); err != nil {
 		t.Errorf("created %q is not RFC3339: %v", item.Created, err)
 	}
-	backlogPath := filepath.Join(s.BacklogDir(), "W-0001 - voice-search.md")
+	backlogPath := filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - voice-search.md")
 	if item.Path != backlogPath {
 		t.Errorf("path = %q, want %q", item.Path, backlogPath)
 	}
@@ -224,16 +278,16 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 
 	// Comments-only shape sections refuse with preflight_failed.
-	if _, err := s.ShapeWork("W-0001", "small"); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "small"); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("shape on empty sections code = %v, want preflight_failed", codeOf(t, err))
 	}
 	// Invalid appetite refuses with preflight_failed.
-	if _, err := s.ShapeWork("W-0001", "huge"); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "huge"); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("shape with bad appetite code = %v, want preflight_failed", codeOf(t, err))
 	}
 
 	fillShapeSections(t, backlogPath)
-	shaped, err := s.ShapeWork("W-0001", "small")
+	shaped, err := s.ShapeWork("W-0001-arash-jafarpour", "small")
 	if err != nil {
 		t.Fatalf("ShapeWork: %v", err)
 	}
@@ -249,11 +303,11 @@ func TestNewWorkLifecycle(t *testing.T) {
 	assertLastHistory(t, shaped.History, "Backlog", "Pitched", "appetite: small")
 
 	setCurrent(t, s, "C-0001")
-	bet, err := s.BetWork("W-0001")
+	bet, err := s.BetWork("W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("BetWork: %v", err)
 	}
-	cyclePath := filepath.Join(s.CycleDir("C-0001"), "W-0001 - voice-search.md")
+	cyclePath := filepath.Join(s.CycleDir("C-0001"), "W-0001-arash-jafarpour - voice-search.md")
 	if bet.Status != "Bet" || bet.Cycle != "C-0001" {
 		t.Errorf("bet = %s/%s, want Bet/C-0001", bet.Status, bet.Cycle)
 	}
@@ -268,7 +322,7 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 	assertLastHistory(t, bet.History, "Pitched", "Bet", "cycle: C-0001")
 
-	shelved, err := s.ShelveWork("W-0001")
+	shelved, err := s.ShelveWork("W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("ShelveWork: %v", err)
 	}
@@ -283,7 +337,7 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 	assertLastHistory(t, shelved.History, "Bet", "Shelved", "cycle: C-0001")
 
-	unshelved, err := s.UnshelveWork("W-0001")
+	unshelved, err := s.UnshelveWork("W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("UnshelveWork: %v", err)
 	}
@@ -292,10 +346,10 @@ func TestNewWorkLifecycle(t *testing.T) {
 	}
 	assertLastHistory(t, unshelved.History, "Shelved", "Pitched", "")
 
-	if _, err := s.BetWork("W-0001"); err != nil {
+	if _, err := s.BetWork("W-0001-arash-jafarpour"); err != nil {
 		t.Fatalf("re-BetWork: %v", err)
 	}
-	delivered, err := s.DeliverWork("W-0001")
+	delivered, err := s.DeliverWork("W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("DeliverWork: %v", err)
 	}
@@ -308,10 +362,10 @@ func TestNewWorkLifecycle(t *testing.T) {
 	assertLastHistory(t, delivered.History, "Bet", "Delivered", "cycle: C-0001")
 
 	// Delivered is terminal.
-	if _, err := s.DeliverWork("W-0001"); codeOf(t, err) != exit.StateConflict {
+	if _, err := s.DeliverWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("re-deliver code = %v, want state_conflict", codeOf(t, err))
 	}
-	if _, err := s.ShelveWork("W-0001"); codeOf(t, err) != exit.StateConflict {
+	if _, err := s.ShelveWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("shelve delivered code = %v, want state_conflict", codeOf(t, err))
 	}
 }
@@ -323,17 +377,17 @@ func TestShapeWorkTwoSectionShape(t *testing.T) {
 	if _, err := s.NewWork("Half shaped", "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(s.BacklogDir(), "W-0001 - half-shaped.md")
+	path := filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - half-shaped.md")
 
 	// Problem filled, Solution Sketch still comment-only → preflight_failed.
 	fillSection(t, path, "Problem")
-	if _, err := s.ShapeWork("W-0001", "small"); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "small"); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("shape with Solution Sketch empty code = %v, want preflight_failed", codeOf(t, err))
 	}
 
 	// Filling the missing half lets the shape through (Backlog → Pitched).
 	fillSection(t, path, "Solution Sketch")
-	shaped, err := s.ShapeWork("W-0001", "small")
+	shaped, err := s.ShapeWork("W-0001-arash-jafarpour", "small")
 	if err != nil {
 		t.Fatalf("ShapeWork with both sections: %v", err)
 	}
@@ -345,9 +399,9 @@ func TestShapeWorkTwoSectionShape(t *testing.T) {
 	if _, err := s.NewWork("Other half", "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	otherPath := filepath.Join(s.BacklogDir(), "W-0002 - other-half.md")
+	otherPath := filepath.Join(s.BacklogDir(), "W-0002-arash-jafarpour - other-half.md")
 	fillSection(t, otherPath, "Solution Sketch")
-	if _, err := s.ShapeWork("W-0002", "big"); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.ShapeWork("W-0002-arash-jafarpour", "big"); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("shape with Problem empty code = %v, want preflight_failed", codeOf(t, err))
 	}
 }
@@ -358,7 +412,7 @@ func TestBacklogToBetRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	setCurrent(t, s, "C-0001")
-	if _, err := s.BetWork("W-0001"); codeOf(t, err) != exit.StateConflict {
+	if _, err := s.BetWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("Backlog → Bet code = %v, want state_conflict", codeOf(t, err))
 	}
 }
@@ -368,11 +422,11 @@ func TestBetWithoutCurrent(t *testing.T) {
 	if _, err := s.NewWork("No cycle", "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	fillShapeSections(t, filepath.Join(s.BacklogDir(), "W-0001 - no-cycle.md"))
-	if _, err := s.ShapeWork("W-0001", "big"); err != nil {
+	fillShapeSections(t, filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - no-cycle.md"))
+	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "big"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.BetWork("W-0001")
+	_, err := s.BetWork("W-0001-arash-jafarpour")
 	if codeOf(t, err) != exit.StateConflict {
 		t.Fatalf("bet without CURRENT code = %v, want state_conflict", codeOf(t, err))
 	}
@@ -402,8 +456,8 @@ func TestFindWork(t *testing.T) {
 	if _, err := s.NewWork("Alpha", "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	backlogPath := filepath.Join(s.BacklogDir(), "W-0001 - alpha.md")
-	got, err := s.FindWork("W-0001")
+	backlogPath := filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - alpha.md")
+	got, err := s.FindWork("W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("FindWork: %v", err)
 	}
@@ -422,10 +476,10 @@ func TestFindWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fsutil.AtomicWrite(filepath.Join(s.CycleDir("C-0001"), "W-0001 - dup.md"), data, 0o644); err != nil {
+	if err := fsutil.AtomicWrite(filepath.Join(s.CycleDir("C-0001"), "W-0001-arash-jafarpour - dup.md"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FindWork("W-0001"); codeOf(t, err) != exit.StateConflict {
+	if _, err := s.FindWork("W-0001-arash-jafarpour"); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("duplicate id code = %v, want state_conflict", codeOf(t, err))
 	}
 }
@@ -442,8 +496,8 @@ func TestListWorkAndShowWork(t *testing.T) {
 			t.Fatalf("NewWork(%s): %v", w.title, err)
 		}
 	}
-	fillShapeSections(t, filepath.Join(s.BacklogDir(), "W-0001 - voice-search.md"))
-	if _, err := s.ShapeWork("W-0001", "small"); err != nil {
+	fillShapeSections(t, filepath.Join(s.BacklogDir(), "W-0001-arash-jafarpour - voice-search.md"))
+	if _, err := s.ShapeWork("W-0001-arash-jafarpour", "small"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -454,7 +508,7 @@ func TestListWorkAndShowWork(t *testing.T) {
 	if len(all) != 3 {
 		t.Fatalf("ListWork all len = %d, want 3", len(all))
 	}
-	for i, id := range []string{"W-0001", "W-0002", "W-0003"} {
+	for i, id := range []string{"W-0001-arash-jafarpour", "W-0002-arash-jafarpour", "W-0003-arash-jafarpour"} {
 		if all[i].ID != id {
 			t.Errorf("ListWork[%d].ID = %q, want %q (sorted)", i, all[i].ID, id)
 		}
@@ -464,8 +518,8 @@ func TestListWorkAndShowWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pitched) != 1 || pitched[0].ID != "W-0001" {
-		t.Errorf("ListWork pitched = %+v, want [W-0001]", pitched)
+	if len(pitched) != 1 || pitched[0].ID != "W-0001-arash-jafarpour" {
+		t.Errorf("ListWork pitched = %+v, want [W-0001-arash-jafarpour]", pitched)
 	}
 
 	scopeA, err := s.ListWork("", "scope-a")
@@ -480,15 +534,15 @@ func TestListWorkAndShowWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(backlogA) != 1 || backlogA[0].ID != "W-0002" {
-		t.Errorf("ListWork backlog+scope-a = %+v, want [W-0002]", backlogA)
+	if len(backlogA) != 1 || backlogA[0].ID != "W-0002-arash-jafarpour" {
+		t.Errorf("ListWork backlog+scope-a = %+v, want [W-0002-arash-jafarpour]", backlogA)
 	}
 
 	if _, err := s.ListWork("bogus", ""); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("bad status code = %v, want preflight_failed", codeOf(t, err))
 	}
 
-	show, err := s.ShowWork("W-0003")
+	show, err := s.ShowWork("W-0003-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("ShowWork: %v", err)
 	}
@@ -518,7 +572,7 @@ func TestWorkItemJSONShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		`"id"`, `"title"`, `"scope"`, `"status"`, `"appetite"`, `"cycle"`,
+		`"id"`, `"title"`, `"owner"`, `"owner_name"`, `"scope"`, `"status"`, `"appetite"`, `"cycle"`,
 		`"project"`, `"provider":"github"`, `"repo":"RTwoStudio/orbit"`,
 		`"issue":7`, `"milestone":3`, `"neocortex_issue"`, `"path"`,
 		`"created"`, `"registry_version"`, `"history":[]`,

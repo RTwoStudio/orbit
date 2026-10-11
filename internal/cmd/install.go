@@ -240,8 +240,8 @@ Steps (each idempotent, independently reported):
      a missing cycles/ domain is a hard failure here, not a soft skip)
   3. Populate the global cache (~/.config/orbit/cycles/cache)
   4. Deploy opencode agents/commands (existing files are NEVER overwritten)
-  5. Bootstrap <vault>/Cycles/: backlog/, cycles/, empty CURRENT, and
-     CYCLES.md (copy-if-missing only)
+  5. Bootstrap <vault>/Cycles/: backlog/, cycles/, empty CURRENT,
+     CYCLES.md, and the developers.yml roster template (copy-if-missing only)
 
 Exit codes: 0 ok · 3 config_error · 4 registry_unreachable · 7 state_conflict
             10 io_error
@@ -370,10 +370,10 @@ func bootstrapProject(fc *registry.Fetched) []StepReport {
 }
 
 // bootstrapVault = cycles install step 5: create <vault>/Cycles/ with its
-// backlog/ and cycles/ subdirs, an empty CURRENT, and a copy of the fetched
-// CYCLES.md root asset. Every write is copy-if-missing, so re-running is a
-// no-op and a locally edited CYCLES.md is never overwritten. A missing root
-// asset is a warned step, not a failure.
+// backlog/ and cycles/ subdirs, an empty CURRENT, and copies of the fetched
+// CYCLES.md and developers.yml root assets. Every write is copy-if-missing, so
+// re-running is a no-op and a locally edited file is never overwritten. A
+// missing root asset is a warned step, not a failure.
 func bootstrapVault(fc *registry.Fetched, s *cycles.Store) []StepReport {
 	var steps []StepReport
 
@@ -403,22 +403,29 @@ func bootstrapVault(fc *registry.Fetched, s *cycles.Store) []StepReport {
 	}
 
 	cyclesMD := filepath.Join(s.CyclesDir(), "CYCLES.md")
-	if fsutil.Exists(cyclesMD) {
-		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "up to date", Path: cyclesMD})
-		return steps
-	}
-	content, ok := fc.Content["CYCLES.md"]
-	if !ok || len(content) == 0 {
-		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "warned",
-			Detail: "registry has no CYCLES.md root asset"})
-		return steps
-	}
-	if err := fsutil.AtomicWrite(cyclesMD, content, 0o644); err != nil {
-		steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "failed", Detail: err.Error()})
-		return steps
-	}
-	steps = append(steps, StepReport{Step: "cycles CYCLES.md", Action: "installed", Path: cyclesMD})
+	steps = append(steps, seedVaultRoot(fc, cyclesMD, "CYCLES.md"))
+	rosterPath := s.RosterPath()
+	steps = append(steps, seedVaultRoot(fc, rosterPath, "developers.yml"))
 	return steps
+}
+
+// seedVaultRoot copies a fetched registry root asset into the vault
+// copy-if-missing: re-running is a no-op and a locally edited file is never
+// overwritten. A missing root asset is a warned step, not a failure.
+func seedVaultRoot(fc *registry.Fetched, target, name string) StepReport {
+	step := "cycles " + name
+	if fsutil.Exists(target) {
+		return StepReport{Step: step, Action: "up to date", Path: target}
+	}
+	content, ok := fc.Content[name]
+	if !ok || len(content) == 0 {
+		return StepReport{Step: step, Action: "warned",
+			Detail: "registry has no " + name + " root asset"}
+	}
+	if err := fsutil.AtomicWrite(target, content, 0o644); err != nil {
+		return StepReport{Step: step, Action: "failed", Detail: err.Error()}
+	}
+	return StepReport{Step: step, Action: "installed", Path: target}
 }
 
 func newNeoCortexUpdateCmd() *cobra.Command {

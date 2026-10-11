@@ -213,6 +213,28 @@ func (d *Doc) SetStringMap(key string, m map[string]string) {
 		&yaml.Node{Kind: yaml.ScalarNode, Value: key}, node)
 }
 
+// SetStringList sets (or appends) a sequence key whose scalar items are emitted
+// in the given order, so the YAML is deterministic. A nil or empty list renders
+// as an empty flow sequence `[]` rather than an empty block.
+func (d *Doc) SetStringList(key string, vals []string) {
+	node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	if len(vals) == 0 {
+		node.Style = yaml.FlowStyle // render as `[]` rather than an empty block
+	}
+	for _, v := range vals {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: v, Tag: "!!str"})
+	}
+	for i := 0; i+1 < len(d.Head.Content); i += 2 {
+		if d.Head.Content[i].Value == key {
+			d.Head.Content[i+1] = node
+			return
+		}
+	}
+	d.Head.Content = append(d.Head.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key}, node)
+}
+
 // SetInt sets (or appends) a scalar integer frontmatter key, tagged `!!int`
 // so it emits as a bare integer rather than a quoted string (`Set` forces
 // `!!str`).

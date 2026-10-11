@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,12 +16,14 @@ import (
 )
 
 // cycleStubFixture mirrors orbit-registry/cycles/stubs/cycle.stub.md: exactly
-// the seven registered tokens, the design §5 frontmatter, and the
-// CLI-generated ## Bets read view.
+// the registered tokens, the design §5 frontmatter, and the CLI-generated
+// ## Bets read view.
 const cycleStubFixture = `---
 release: {{RELEASE}}
 id: {{CYCLE_ID}}
 goal: "{{CYCLE_GOAL}}"
+created_by: {{CREATED_BY}}
+subscribers: []
 status: Open
 start: {{START_DATE}}
 end: {{END_DATE}}
@@ -137,7 +140,7 @@ func TestParseCycleID(t *testing.T) {
 			t.Errorf("ParseCycleID(%q): %v", id, err)
 		}
 	}
-	invalid := []string{"", "C-001", "C-1", "C-abcd", "W-0001", "c-0001", "0001", "C-0001x", "C 0001"}
+	invalid := []string{"", "C-001", "C-1", "C-abcd", "W-0001-arash-jafarpour", "c-0001", "0001", "C-0001x", "C 0001"}
 	for _, id := range invalid {
 		if _, err := ParseCycleID(id); codeOf(t, err) != exit.PreflightFailed {
 			t.Errorf("ParseCycleID(%q) code = %v, want preflight_failed", id, codeOf(t, err))
@@ -336,7 +339,7 @@ func TestCloseCycleAutoShelve(t *testing.T) {
 	}
 	mustWork(t, s, "Cancellation flow", "scope-a", true)
 	mustWork(t, s, "Phone search", "scope-a", true)
-	if _, err := s.DeliverWork("W-0001"); err != nil {
+	if _, err := s.DeliverWork("W-0001-arash-jafarpour"); err != nil {
 		t.Fatalf("DeliverWork: %v", err)
 	}
 
@@ -350,14 +353,14 @@ func TestCloseCycleAutoShelve(t *testing.T) {
 	if _, err := s.ReadCurrent(); codeOf(t, err) != exit.StateConflict {
 		t.Errorf("CURRENT after close code = %v, want state_conflict", codeOf(t, err))
 	}
-	if !fsutil.Exists(filepath.Join(s.CycleDir("C-0001"), "W-0001 - cancellation-flow.md")) {
+	if !fsutil.Exists(filepath.Join(s.CycleDir("C-0001"), "W-0001-arash-jafarpour - cancellation-flow.md")) {
 		t.Errorf("delivered note was not left in the cycle folder")
 	}
-	shelvedPath := filepath.Join(s.BacklogDir(), "W-0002 - phone-search.md")
+	shelvedPath := filepath.Join(s.BacklogDir(), "W-0002-arash-jafarpour - phone-search.md")
 	if !fsutil.Exists(shelvedPath) {
 		t.Fatalf("shelved note missing at %s", shelvedPath)
 	}
-	got, err := s.ShowWork("W-0002")
+	got, err := s.ShowWork("W-0002-arash-jafarpour")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,10 +374,10 @@ func TestCloseCycleAutoShelve(t *testing.T) {
 		t.Errorf("cycle note status not Closed:\n%s", note)
 	}
 	bets := cycleBetsSection(t, note)
-	if !strings.Contains(bets, "W-0001") || !strings.Contains(bets, "(Delivered)") {
+	if !strings.Contains(bets, "W-0001-arash-jafarpour") || !strings.Contains(bets, "(Delivered)") {
 		t.Errorf("closed Bets missing delivered item: %q", bets)
 	}
-	if strings.Contains(bets, "W-0002") {
+	if strings.Contains(bets, "W-0002-arash-jafarpour") {
 		t.Errorf("closed Bets still lists the shelved item: %q", bets)
 	}
 
@@ -409,7 +412,7 @@ func TestBetsRefreshOnWorkVerbs(t *testing.T) {
 	if _, err := s.BetWork(it.ID); err != nil {
 		t.Fatal(err)
 	}
-	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); !strings.Contains(bets, "- W-0001 — Cancellation flow (Bet)") {
+	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); !strings.Contains(bets, "- W-0001-arash-jafarpour — Cancellation flow (Bet)") {
 		t.Errorf("bets after bet = %q", bets)
 	}
 	if _, err := s.ShelveWork(it.ID); err != nil {
@@ -427,7 +430,7 @@ func TestBetsRefreshOnWorkVerbs(t *testing.T) {
 	if _, err := s.DeliverWork(it.ID); err != nil {
 		t.Fatal(err)
 	}
-	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); !strings.Contains(bets, "- W-0001 — Cancellation flow (Delivered)") {
+	if bets := cycleBetsSection(t, cycleNote(t, s, "C-0001")); !strings.Contains(bets, "- W-0001-arash-jafarpour — Cancellation flow (Delivered)") {
 		t.Errorf("bets after deliver = %q", bets)
 	}
 }
@@ -485,8 +488,8 @@ func TestListShowCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShowCycle: %v", err)
 	}
-	if len(cy.Bets) != 1 || cy.Bets[0].ID != "W-0001" {
-		t.Errorf("ShowCycle bets = %+v, want [W-0001]", cy.Bets)
+	if len(cy.Bets) != 1 || cy.Bets[0].ID != "W-0001-arash-jafarpour" {
+		t.Errorf("ShowCycle bets = %+v, want [W-0001-arash-jafarpour]", cy.Bets)
 	}
 	if _, err := s.ShowCycle("C-0099"); codeOf(t, err) != exit.NotFound {
 		t.Errorf("unknown cycle code = %v, want not_found", codeOf(t, err))
@@ -514,7 +517,8 @@ func TestCycleJSONShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		`"id"`, `"goal"`, `"release"`, `"status"`, `"start"`, `"end"`,
+		`"id"`, `"goal"`, `"created_by":"` + testOwnerHandle + `"`, `"subscribers":[]`,
+		`"release"`, `"status"`, `"start"`, `"end"`,
 		`"project":"/home/x/proj"`, `"repo"`, `"provider"`,
 		`"milestone":{"RTwoStudio/orbit":4}`,
 		`"created"`, `"registry_version"`, `"path"`, `"bets":[]`,
@@ -522,5 +526,164 @@ func TestCycleJSONShape(t *testing.T) {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("marshalled Cycle missing %s: %s", key, data)
 		}
+	}
+}
+
+// testRosterTwo is a two-entry roster so the subscribers helpers can exercise
+// order, dedupe, and unknown-handle validation.
+const testRosterTwo = "# two developers\n" +
+	"arash-jafarpour:\n" +
+	"  name: Arash Jafarpour\n" +
+	"  email: arash@example.com\n" +
+	"  github: arashjf\n" +
+	"seyed-mahdi-rostami:\n" +
+	"  name: Seyed Mahdi Rostami\n" +
+	"  email: seyed@example.com\n" +
+	"  github: seyedmr\n"
+
+// TestNewCycleStampsCreatedBy: `cycle new` resolves the creator from git
+// identity + roster and stamps `created_by:`; subscribers seed empty.
+func TestNewCycleStampsCreatedBy(t *testing.T) {
+	s := setupVault(t)
+	cy, err := s.NewCycle("Ship v1", "0.3.0", "", "")
+	if err != nil {
+		t.Fatalf("NewCycle: %v", err)
+	}
+	if cy.CreatedBy != testOwnerHandle {
+		t.Errorf("created_by = %q, want %q", cy.CreatedBy, testOwnerHandle)
+	}
+	if cy.Subscribers == nil || len(cy.Subscribers) != 0 {
+		t.Errorf("subscribers = %#v, want empty non-nil", cy.Subscribers)
+	}
+	note := cycleNote(t, s, cy.ID)
+	for _, want := range []string{"created_by: " + testOwnerHandle, "subscribers: []"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("cycle note missing %q:\n%s", want, note)
+		}
+	}
+}
+
+// TestNewCycleRequiresRosterIdentity: a vault with no roster fails
+// preflight_failed (6), exactly like work new.
+func TestNewCycleRequiresRosterIdentity(t *testing.T) {
+	s := testStore(t) // initialized, no roster, no git identity
+	if _, err := s.NewCycle("Goal", "0.1.0", "", ""); codeOf(t, err) != exit.PreflightFailed {
+		t.Fatalf("no-roster code = %v, want preflight_failed", codeOf(t, err))
+	}
+}
+
+// TestSetSubscribersValidatesAndDedupes: handles are trimmed, validated against
+// the roster, deduped preserving first-seen order, and round-trip through a read.
+func TestSetSubscribersValidatesAndDedupes(t *testing.T) {
+	s := setupVault(t)
+	writeRoster(t, s, testRosterTwo)
+	cy, err := s.NewCycle("Team", "0.1.0", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SetSubscribers(cy.ID, []string{
+		"seyed-mahdi-rostami",
+		" arash-jafarpour ",
+		"seyed-mahdi-rostami", // duplicate dropped
+	})
+	if err != nil {
+		t.Fatalf("SetSubscribers: %v", err)
+	}
+	want := []string{"seyed-mahdi-rostami", "arash-jafarpour"}
+	if !reflect.DeepEqual(got.Subscribers, want) {
+		t.Errorf("subscribers = %v, want %v", got.Subscribers, want)
+	}
+
+	back, err := s.ShowCycle(cy.ID)
+	if err != nil {
+		t.Fatalf("ShowCycle: %v", err)
+	}
+	if !reflect.DeepEqual(back.Subscribers, want) {
+		t.Errorf("round-trip subscribers = %v, want %v", back.Subscribers, want)
+	}
+
+	// An empty list round-trips as a non-nil empty slice, not null.
+	empty, err := s.SetSubscribers(cy.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Subscribers == nil || len(empty.Subscribers) != 0 {
+		t.Errorf("cleared subscribers = %#v, want empty non-nil", empty.Subscribers)
+	}
+}
+
+// TestSetSubscribersFaults: unknown/empty handles and bad ids are coded errors.
+func TestSetSubscribersFaults(t *testing.T) {
+	s := setupVault(t)
+	cy, err := s.NewCycle("Team", "0.1.0", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.SetSubscribers(cy.ID, []string{"nobody"})
+	if codeOf(t, err) != exit.PreflightFailed {
+		t.Fatalf("unknown handle code = %v, want preflight_failed", codeOf(t, err))
+	}
+	var e *exit.Error
+	if !errors.As(err, &e) || !strings.Contains(strings.Join(e.Hints, " "), s.RosterPath()) {
+		t.Errorf("unknown-handle hint should name the roster: %v", err)
+	}
+	if _, err := s.SetSubscribers(cy.ID, []string{"  "}); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("empty handle code = %v, want preflight_failed", codeOf(t, err))
+	}
+	if _, err := s.SetSubscribers("C-0099", []string{testOwnerHandle}); codeOf(t, err) != exit.NotFound {
+		t.Errorf("missing cycle code = %v, want not_found", codeOf(t, err))
+	}
+	if _, err := s.SetSubscribers("nope", nil); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("bad id code = %v, want preflight_failed", codeOf(t, err))
+	}
+}
+
+// TestAddSubscriberIdempotent: adding an existing handle rewrites the same list.
+func TestAddSubscriberIdempotent(t *testing.T) {
+	s := setupVault(t)
+	cy, err := s.NewCycle("Team", "0.1.0", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.AddSubscriber(cy.ID, testOwnerHandle)
+	if err != nil {
+		t.Fatalf("AddSubscriber: %v", err)
+	}
+	if !reflect.DeepEqual(got.Subscribers, []string{testOwnerHandle}) {
+		t.Errorf("after add = %v, want [%s]", got.Subscribers, testOwnerHandle)
+	}
+	got, err = s.AddSubscriber(cy.ID, testOwnerHandle)
+	if err != nil {
+		t.Fatalf("re-add: %v", err)
+	}
+	if !reflect.DeepEqual(got.Subscribers, []string{testOwnerHandle}) {
+		t.Errorf("after re-add = %v, want [%s] (idempotent)", got.Subscribers, testOwnerHandle)
+	}
+	if _, err := s.AddSubscriber(cy.ID, "nobody"); codeOf(t, err) != exit.PreflightFailed {
+		t.Errorf("add unknown code = %v, want preflight_failed", codeOf(t, err))
+	}
+}
+
+// TestCycleNotePathIsDeterministic pins the locked invariant: the cycle note
+// path is cycles/C-####/C-####.md — the id in the directory and filename, with
+// no goal slug.
+func TestCycleNotePathIsDeterministic(t *testing.T) {
+	s := setupVault(t)
+	cy, err := s.NewCycle("A goal with spaces and punctuation!", "2.4.6", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(s.LedgerDir(), "C-0001", "C-0001.md")
+	if cy.Path != want {
+		t.Errorf("path = %q, want %q", cy.Path, want)
+	}
+	if !fsutil.Exists(want) {
+		t.Errorf("cycle note not at the deterministic path %s", want)
+	}
+	if got := filepath.Base(want); got != "C-0001.md" {
+		t.Errorf("filename = %q, want C-0001.md (no slug)", got)
 	}
 }

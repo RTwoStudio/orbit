@@ -15,20 +15,28 @@ import (
 // cyclesInstallCyclesMD is the fetched root asset install copies into the
 // vault. Its exact bytes are the fixture's; the real one lives in
 // orbit-registry/cycles/CYCLES.md.
-const cyclesInstallCyclesMD = "---\nRegistry-Version: 0.1.0\n---\n\n# CYCLES\n\nfixture quick ref.\n"
+const cyclesInstallCyclesMD = "---\nRegistry-Version: 0.1.1\n---\n\n# CYCLES\n\nfixture quick ref.\n"
+
+// cyclesInstallDevelopersYML is the fetched roster root asset: a ready-to-use
+// one-entry roster matching initVaultGit's identity. The real template lives in
+// orbit-registry/cycles/developers.yml.
+const cyclesInstallDevelopersYML = cyclesCmdRoster
 
 // setupCyclesInstall isolates $HOME, primes a hash-valid cycles registry
-// fixture (CYCLES.md + both stubs), and writes a temp config with a registry
-// URL plus vault.dir. The vault itself is left untouched — creating it is the
-// behavior under test.
+// fixture (CYCLES.md + developers.yml + both stubs), gives the vault a git
+// identity, and writes a temp config with a registry URL plus vault.dir. The
+// vault's Cycles/ layout is left untouched — creating it is the behavior under
+// test.
 func setupCyclesInstall(t *testing.T, vault string) string {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ORBIT_NO_COMPLETION", "1")
+	initVaultGit(t, vault)
 
 	regRoot := t.TempDir()
 	writeCmdDomainFixture(t, regRoot, domain.Cycles, map[string]string{
 		"CYCLES.md":           cyclesInstallCyclesMD,
+		"developers.yml":      cyclesInstallDevelopersYML,
 		"stubs/work.stub.md":  cyclesCmdWorkStub,
 		"stubs/cycle.stub.md": cyclesCmdCycleStub,
 	})
@@ -105,7 +113,7 @@ func TestCyclesInstallBootstrapsVault(t *testing.T) {
 	for _, s := range env.Steps {
 		seen[s.Step] = true
 	}
-	for _, want := range []string{"cycles fetch", "cycles cache", "cycles vault", "cycles CURRENT", "cycles CYCLES.md"} {
+	for _, want := range []string{"cycles fetch", "cycles cache", "cycles vault", "cycles CURRENT", "cycles CYCLES.md", "cycles developers.yml"} {
 		if !seen[want] {
 			t.Errorf("json steps missing %q; got %+v", want, env.Steps)
 		}
@@ -124,6 +132,13 @@ func TestCyclesInstallBootstrapsVault(t *testing.T) {
 	if string(md) != cyclesInstallCyclesMD {
 		t.Errorf("CYCLES.md = %q, want the fetched root asset", md)
 	}
+	roster, err := os.ReadFile(s.RosterPath())
+	if err != nil {
+		t.Fatalf("read developers.yml: %v", err)
+	}
+	if string(roster) != cyclesInstallDevelopersYML {
+		t.Errorf("developers.yml = %q, want the fetched roster asset", roster)
+	}
 	cur, err := os.ReadFile(s.CurrentPath())
 	if err != nil {
 		t.Fatalf("read CURRENT: %v", err)
@@ -137,8 +152,8 @@ func TestCyclesInstallBootstrapsVault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("work new after install: %v", err)
 	}
-	if item := decodeJSON[cycles.WorkItem](t, out); item.ID != "W-0001" {
-		t.Errorf("work new id = %q, want W-0001", item.ID)
+	if item := decodeJSON[cycles.WorkItem](t, out); item.ID != "W-0001-arash-jafarpour" {
+		t.Errorf("work new id = %q, want W-0001-arash-jafarpour", item.ID)
 	}
 }
 
@@ -152,9 +167,14 @@ func TestCyclesInstallIdempotentAndCopyIfMissing(t *testing.T) {
 	s := cycles.Open(vault)
 	mdPath := filepath.Join(s.CyclesDir(), "CYCLES.md")
 
-	// Locally edit CYCLES.md: copy-if-missing must preserve it on re-run.
-	edited := "---\nRegistry-Version: 0.1.0\n---\n\n# CYCLES\n\nlocally edited.\n"
+	// Locally edit CYCLES.md and the roster: copy-if-missing must preserve both
+	// on re-run.
+	edited := "---\nRegistry-Version: 0.1.1\n---\n\n# CYCLES\n\nlocally edited.\n"
 	if err := fsutil.AtomicWrite(mdPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	editedRoster := cyclesInstallDevelopersYML + "  # locally added note\n"
+	if err := fsutil.AtomicWrite(s.RosterPath(), []byte(editedRoster), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,6 +194,13 @@ func TestCyclesInstallIdempotentAndCopyIfMissing(t *testing.T) {
 	}
 	if string(after) != edited {
 		t.Errorf("CYCLES.md was overwritten on re-run: %q", after)
+	}
+	afterRoster, err := os.ReadFile(s.RosterPath())
+	if err != nil {
+		t.Fatalf("read developers.yml after re-run: %v", err)
+	}
+	if string(afterRoster) != editedRoster {
+		t.Errorf("developers.yml was overwritten on re-run: %q", afterRoster)
 	}
 	if cur, _ := os.ReadFile(s.CurrentPath()); len(cur) != 0 {
 		t.Errorf("CURRENT rewritten on re-run: %q", cur)

@@ -120,10 +120,10 @@ func TestSetWorkForgeRejectsBadInput(t *testing.T) {
 	if _, err := s.NewWork("Neg", "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetWorkForge("W-0001", WorkForge{Issue: -1}); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.SetWorkForge("W-0001-arash-jafarpour", WorkForge{Issue: -1}); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("negative issue code = %v, want preflight_failed", codeOf(t, err))
 	}
-	if _, err := s.SetWorkForge("W-0001", WorkForge{Milestone: -2}); codeOf(t, err) != exit.PreflightFailed {
+	if _, err := s.SetWorkForge("W-0001-arash-jafarpour", WorkForge{Milestone: -2}); codeOf(t, err) != exit.PreflightFailed {
 		t.Errorf("negative milestone code = %v, want preflight_failed", codeOf(t, err))
 	}
 	if _, err := s.SetWorkForge("W-0099", WorkForge{}); codeOf(t, err) != exit.NotFound {

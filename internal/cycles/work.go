@@ -21,6 +21,8 @@ import (
 type WorkItem struct {
 	ID              string   `json:"id"`
 	Title           string   `json:"title"`
+	Owner           string   `json:"owner"`
+	OwnerName       string   `json:"owner_name"`
 	Scope           string   `json:"scope"`
 	Status          string   `json:"status"`
 	Appetite        string   `json:"appetite"`
@@ -44,6 +46,11 @@ const (
 
 // NewWork creates a work note in backlog/ as Backlog with an empty history,
 // rendered from the cached work.stub.md using only the registered tokens.
+//
+// The local developer's handle and display name are resolved from the vault
+// clone's git identity via the roster; the composite id
+// `W-<seq>-<owner-slug>` is next in that owner's per-owner sequence and the
+// note records `owner:` / `owner_name:`.
 func (s *Store) NewWork(title, scope string) (*WorkItem, error) {
 	title = strings.TrimSpace(title)
 	scope = strings.TrimSpace(scope)
@@ -60,11 +67,16 @@ func (s *Store) NewWork(title, scope string) (*WorkItem, error) {
 			"run: orbit cycles install")
 	}
 
+	dev, err := s.ResolveDeveloper()
+	if err != nil {
+		return nil, err
+	}
+
 	stub, version, err := s.workStub()
 	if err != nil {
 		return nil, err
 	}
-	id, err := s.NextWorkID()
+	id, err := s.NextWorkID(dev.Handle)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +86,8 @@ func (s *Store) NewWork(title, scope string) (*WorkItem, error) {
 	rendered, err := scaffold.Render(stub, map[string]string{
 		"WORK_ID":          id,
 		"WORK_TITLE":       title,
+		"WORK_OWNER":       dev.Handle,
+		"WORK_OWNER_NAME":  dev.Name,
 		"SCOPE":            scope,
 		"DATE":             time.Now().UTC().Format(time.RFC3339),
 		"REGISTRY_VERSION": version,
@@ -245,7 +259,7 @@ func (s *Store) DeliverWork(id string) (*WorkItem, error) {
 
 // ListWork returns every work item across backlog/ and all cycles/C-*/,
 // optionally filtered by status (case-insensitive) and scope (exact), sorted
-// by numeric id. Read-only.
+// by sequence → owner → title. Read-only.
 func (s *Store) ListWork(status, scope string) ([]WorkItem, error) {
 	var want WorkStatus
 	if strings.TrimSpace(status) != "" {
@@ -276,11 +290,7 @@ func (s *Store) ListWork(status, scope string) ([]WorkItem, error) {
 		}
 		items = append(items, *it)
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		ni, _ := workIDNum(items[i].ID)
-		nj, _ := workIDNum(items[j].ID)
-		return ni < nj
-	})
+	sort.SliceStable(items, func(i, j int) bool { return lessWorkItems(items, i, j) })
 	return items, nil
 }
 
@@ -332,6 +342,20 @@ func (s *Store) moveWorkTo(d *doc.Doc, toDir string) error {
 	return nil
 }
 
+// lessWorkItems is the shared read-view ordering: numeric sequence, then owner
+// handle, then title. It is total enough for a stable sort to be deterministic.
+func lessWorkItems(items []WorkItem, i, j int) bool {
+	ni, _ := workIDNum(items[i].ID)
+	nj, _ := workIDNum(items[j].ID)
+	if ni != nj {
+		return ni < nj
+	}
+	if items[i].Owner != items[j].Owner {
+		return items[i].Owner < items[j].Owner
+	}
+	return items[i].Title < items[j].Title
+}
+
 // workItemFromDoc builds the shared read shape from a parsed note.
 func workItemFromDoc(d *doc.Doc) *WorkItem {
 	history := d.GetStringList("history")
@@ -341,6 +365,8 @@ func workItemFromDoc(d *doc.Doc) *WorkItem {
 	return &WorkItem{
 		ID:              d.Get("id"),
 		Title:           d.Get("title"),
+		Owner:           d.Get("owner"),
+		OwnerName:       d.Get("owner_name"),
 		Scope:           d.Get("scope"),
 		Status:          canonicalStatus(d.Get("status")),
 		Appetite:        d.Get("appetite"),

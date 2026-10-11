@@ -35,6 +35,8 @@ const bareDateLayout = "2006-01-02"
 type Cycle struct {
 	ID              string         `json:"id"`
 	Goal            string         `json:"goal"`
+	CreatedBy       string         `json:"created_by"`
+	Subscribers     []string       `json:"subscribers"`
 	Release         string         `json:"release"`
 	Status          string         `json:"status"`
 	Start           string         `json:"start"`
@@ -78,6 +80,14 @@ func (s *Store) NewCycle(goal, release, start, end string) (*Cycle, error) {
 			"close it first: orbit cycles cycle close")
 	}
 
+	// Resolve the creator's handle from the vault clone's git identity + roster
+	// (design §4). Every roster/identity fault propagates as preflight_failed
+	// (6), exactly like NewWork.
+	dev, err := s.ResolveDeveloper()
+	if err != nil {
+		return nil, err
+	}
+
 	startT, err := resolveStart(start)
 	if err != nil {
 		return nil, err
@@ -104,6 +114,7 @@ func (s *Store) NewCycle(goal, release, start, end string) (*Cycle, error) {
 		"RELEASE":          release,
 		"CYCLE_ID":         id,
 		"CYCLE_GOAL":       goal,
+		"CREATED_BY":       dev.Handle,
 		"START_DATE":       startT.Format(bareDateLayout),
 		"END_DATE":         endT.Format(bareDateLayout),
 		"DATE":             time.Now().UTC().Format(time.RFC3339),
@@ -259,6 +270,80 @@ func (s *Store) ShowCycle(id string) (*Cycle, error) {
 	return cy, nil
 }
 
+// SetSubscribers replaces a cycle's `subscribers:` list with the given handles.
+// Every handle is trimmed and validated against the roster (an unknown handle is
+// a preflight_failed 6); duplicates are dropped, preserving first-seen order.
+// The validated list is written back and the cycle's read shape is returned.
+func (s *Store) SetSubscribers(id string, handles []string) (*Cycle, error) {
+	id, err := ParseCycleID(id)
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.validateHandles(handles)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(s.CycleDir(id), id+".md")
+	d, err := doc.ParseDoc(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, exit.New(exit.NotFound,
+				fmt.Sprintf("cycle %s not found", id),
+				"list cycles with: orbit cycles cycle list")
+		}
+		return nil, exit.Wrap(exit.PreflightFailed, err, "cannot parse cycle note "+path)
+	}
+	d.SetStringList("subscribers", list)
+	if err := d.Save(); err != nil {
+		return nil, exit.Wrap(exit.IOError, err, "cannot rewrite "+d.Path)
+	}
+	logx.Info("cycle subscribers set id=%s n=%d", id, len(list))
+	return s.cycleFromDoc(d, id), nil
+}
+
+// AddSubscriber appends one handle to a cycle's subscribers when it is not
+// already present. It is idempotent — re-adding an existing handle rewrites the
+// same list. The handle is validated against the roster exactly like
+// SetSubscribers (unknown → preflight_failed 6).
+func (s *Store) AddSubscriber(id, handle string) (*Cycle, error) {
+	cy, err := s.ShowCycle(id)
+	if err != nil {
+		return nil, err
+	}
+	return s.SetSubscribers(id, append(append([]string{}, cy.Subscribers...), handle))
+}
+
+// validateHandles trims and roster-validates a subscriber list, deduping while
+// preserving first-seen order. An empty or unknown handle is a preflight_failed
+// (6) naming the roster.
+func (s *Store) validateHandles(handles []string) ([]string, error) {
+	r, err := s.LoadRoster()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(handles))
+	seen := make(map[string]bool, len(handles))
+	for _, h := range handles {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			return nil, exit.New(exit.PreflightFailed,
+				"subscriber handle must not be empty",
+				"pass a roster handle, e.g. <handle>")
+		}
+		if _, ok := r.Lookup(h); !ok {
+			return nil, exit.New(exit.PreflightFailed,
+				fmt.Sprintf("unknown subscriber %q — not in the developer roster", h),
+				"add the handle to "+s.RosterPath()+" first")
+		}
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	return out, nil
+}
+
 // cycleWorkFiles returns every work-note path (W-*.md) inside a cycle folder.
 // A missing cycle folder is an empty result.
 func (s *Store) cycleWorkFiles(id string) ([]string, error) {
@@ -275,7 +360,7 @@ func (s *Store) cycleWorkFiles(id string) ([]string, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		if !workIDRe.MatchString(workIDFromFilename(e.Name())) {
+		if !isWorkID(workIDFromFilename(e.Name())) {
 			continue
 		}
 		out = append(out, filepath.Join(dir, e.Name()))
@@ -283,8 +368,8 @@ func (s *Store) cycleWorkFiles(id string) ([]string, error) {
 	return out, nil
 }
 
-// listCycleWork parses a cycle's committed work notes, sorted by numeric id.
-// Read-only and tolerant of unparseable notes.
+// listCycleWork parses a cycle's committed work notes, sorted by sequence →
+// owner → title. Read-only and tolerant of unparseable notes.
 func (s *Store) listCycleWork(id string) ([]WorkItem, error) {
 	files, err := s.cycleWorkFiles(id)
 	if err != nil {
@@ -298,11 +383,7 @@ func (s *Store) listCycleWork(id string) ([]WorkItem, error) {
 		}
 		items = append(items, *workItemFromDoc(d))
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		ni, _ := workIDNum(items[i].ID)
-		nj, _ := workIDNum(items[j].ID)
-		return ni < nj
-	})
+	sort.SliceStable(items, func(i, j int) bool { return lessWorkItems(items, i, j) })
 	return items, nil
 }
 
@@ -341,9 +422,15 @@ func (s *Store) refreshCycleBetsBestEffort(cycleID string) {
 
 // cycleFromDoc builds the shared read shape from a parsed cycle note.
 func (s *Store) cycleFromDoc(d *doc.Doc, id string) *Cycle {
+	subscribers := d.GetStringList("subscribers")
+	if subscribers == nil {
+		subscribers = []string{}
+	}
 	return &Cycle{
 		ID:              d.Get("id"),
 		Goal:            d.Get("goal"),
+		CreatedBy:       d.Get("created_by"),
+		Subscribers:     subscribers,
 		Release:         d.Get("release"),
 		Status:          canonicalCycleStatus(d.Get("status")),
 		Start:           d.Get("start"),
@@ -409,7 +496,7 @@ func parseBareDate(field, value string) (time.Time, error) {
 }
 
 // renderBets formats the `## Bets` read view: one bullet per committed work
-// note, e.g. `- W-0003 — Cancellation flow (Bet)`.
+// note, e.g. `- W-0003-arash-jafarpour — Cancellation flow (Bet)`.
 func renderBets(items []WorkItem) string {
 	var b strings.Builder
 	for i, it := range items {

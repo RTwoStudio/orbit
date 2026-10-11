@@ -188,6 +188,61 @@ func TestSetStringMap(t *testing.T) {
 	}
 }
 
+func TestSetStringList(t *testing.T) {
+	src := "---\nKeep: yes\nsubscribers: []\n---\nbody\n"
+	d, err := ParseDocBytes("mem.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetStringList("subscribers", []string{"seyed-mahdi-rostami", "arash-jafarpour"})
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, err := ParseDocBytes("mem.md", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"seyed-mahdi-rostami", "arash-jafarpour"}
+	if got := d2.GetStringList("subscribers"); !reflect.DeepEqual(got, want) {
+		t.Errorf("round-trip list = %v, want %v", got, want)
+	}
+	// Order is preserved as given (not sorted).
+	if strings.Index(string(out), "seyed-mahdi-rostami") > strings.Index(string(out), "arash-jafarpour") {
+		t.Errorf("SetStringList reordered the list:\n%s", out)
+	}
+	if string(d2.Body) != "body\n" {
+		t.Errorf("body = %q, want %q", string(d2.Body), "body\n")
+	}
+	if d2.Get("Keep") != "yes" {
+		t.Errorf("SetStringList clobbered a sibling key: %q", d2.Get("Keep"))
+	}
+
+	// An empty/nil list renders as a flow `[]`, not an empty block.
+	d2.SetStringList("subscribers", nil)
+	out2, err := d2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out2), "subscribers: []") {
+		t.Errorf("empty list should render as `subscribers: []`:\n%s", out2)
+	}
+
+	// A missing key is appended and reads back.
+	d2.SetStringList("fresh", []string{"a", "b"})
+	out3, err := d2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d3, err := ParseDocBytes("mem.md", out3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d3.GetStringList("fresh"); !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("appended list = %v, want [a b]", got)
+	}
+}
+
 func TestSetInt(t *testing.T) {
 	src := "---\nissue:\n---\nbody\n"
 	d, err := ParseDocBytes("mem.md", []byte(src))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,11 +19,13 @@ import (
 	"github.com/RTwoStudio/orbit/internal/registry"
 )
 
-// cyclesCmdWorkStub mirrors orbit-registry/cycles/stubs/work.stub.md: exactly
-// the five registered tokens and the CLI-owned frontmatter fields.
+// cyclesCmdWorkStub mirrors orbit-registry/cycles/stubs/work.stub.md: the
+// registered tokens and the CLI-owned frontmatter fields.
 const cyclesCmdWorkStub = `---
 id: {{WORK_ID}}
 title: "{{WORK_TITLE}}"
+owner: {{WORK_OWNER}}
+owner_name: "{{WORK_OWNER_NAME}}"
 scope: {{SCOPE}}
 status: Backlog
 appetite:
@@ -58,6 +61,8 @@ const cyclesCmdCycleStub = `---
 release: {{RELEASE}}
 id: {{CYCLE_ID}}
 goal: "{{CYCLE_GOAL}}"
+created_by: {{CREATED_BY}}
+subscribers: []
 status: Open
 start: {{START_DATE}}
 end: {{END_DATE}}
@@ -152,7 +157,8 @@ func setupCyclesCmd(t *testing.T) *cyclesCmdEnv {
 	return &cyclesCmdEnv{vault: vault, cfgPath: cfgPath}
 }
 
-// initCyclesVault creates the minimal Cycles layout (install is T7).
+// initCyclesVault creates the minimal Cycles layout (install is T7), seeds the
+// test developer roster, and gives the vault a matching git identity.
 func initCyclesVault(t *testing.T, vault string) {
 	t.Helper()
 	s := cycles.Open(vault)
@@ -163,6 +169,43 @@ func initCyclesVault(t *testing.T, vault string) {
 	}
 	if err := fsutil.AtomicWrite(s.CurrentPath(), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := fsutil.AtomicWrite(s.RosterPath(), []byte(cyclesCmdRoster), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initVaultGit(t, vault)
+}
+
+// The test developer whose roster entry matches the vault clone's git identity.
+const (
+	cmdOwnerHandle = "arash-jafarpour"
+	cmdOwnerName   = "Arash Jafarpour"
+	cmdOwnerEmail  = "arash@example.com"
+)
+
+// cyclesCmdRoster is an active one-entry roster matching initVaultGit's identity.
+const cyclesCmdRoster = "arash-jafarpour:\n" +
+	"  name: Arash Jafarpour\n" +
+	"  email: arash@example.com\n" +
+	"  github: arashjf\n" +
+	"  gitlab: arashjf\n"
+
+// initVaultGit makes dir a git repo carrying the test developer's identity.
+// Tests skip when git is not installed.
+func initVaultGit(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.name", cmdOwnerName},
+		{"config", "user.email", cmdOwnerEmail},
+	} {
+		full := append([]string{"-C", dir}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
 	}
 }
 
@@ -274,7 +317,7 @@ func TestCyclesWorkLifecycle(t *testing.T) {
 		t.Fatalf("work new --json: %v", err)
 	}
 	item := decodeJSON[cycles.WorkItem](t, out)
-	if item.ID != "W-0001" || item.Status != "Backlog" || item.Scope != "app" {
+	if item.ID != "W-0001-arash-jafarpour" || item.Status != "Backlog" || item.Scope != "app" {
 		t.Fatalf("unexpected WorkItem: %+v", item)
 	}
 	if item.Path == "" {
@@ -286,12 +329,12 @@ func TestCyclesWorkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("work new: %v", err)
 	}
-	if !strings.Contains(out, "Created W-0002 (Backlog)") {
+	if !strings.Contains(out, "Created W-0002-arash-jafarpour (Backlog)") {
 		t.Errorf("human work new output = %q", out)
 	}
 
 	fillCyclesShapeSections(t, item.Path)
-	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "shape", "W-0001", "--appetite", "small", "--json")
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "shape", "W-0001-arash-jafarpour", "--appetite", "small", "--json")
 	if err != nil {
 		t.Fatalf("work shape: %v", err)
 	}
@@ -315,27 +358,27 @@ func TestCyclesWorkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("work list: %v", err)
 	}
-	for _, want := range []string{"ID", "TITLE", "STATUS", "SCOPE", "CYCLE", "W-0001"} {
+	for _, want := range []string{"ID", "TITLE", "STATUS", "SCOPE", "CYCLE", "W-0001-arash-jafarpour"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("work list missing %q; got:\n%s", want, out)
 		}
 	}
 
 	// show human prints the note verbatim.
-	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "show", "W-0001")
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "show", "W-0001-arash-jafarpour")
 	if err != nil {
 		t.Fatalf("work show: %v", err)
 	}
-	if !strings.Contains(out, "# W-0001") {
+	if !strings.Contains(out, "# W-0001-arash-jafarpour") {
 		t.Errorf("work show human missing note body; got:\n%s", out)
 	}
 
 	// show --json emits the typed WorkItem.
-	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "show", "W-0001", "--json")
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "show", "W-0001-arash-jafarpour", "--json")
 	if err != nil {
 		t.Fatalf("work show --json: %v", err)
 	}
-	if got := decodeJSON[cycles.WorkItem](t, out); got.ID != "W-0001" || got.Status != "Pitched" {
+	if got := decodeJSON[cycles.WorkItem](t, out); got.ID != "W-0001-arash-jafarpour" || got.Status != "Pitched" {
 		t.Errorf("work show --json = %+v", got)
 	}
 }
@@ -352,8 +395,14 @@ func TestCyclesCycleAndStatus(t *testing.T) {
 	if cy.ID != "C-0001" || cy.Status != "Open" || cy.Release != "0.3.0" {
 		t.Fatalf("cycle new = %+v", cy)
 	}
+	if cy.CreatedBy != cmdOwnerHandle {
+		t.Errorf("cycle new created_by = %q, want %q", cy.CreatedBy, cmdOwnerHandle)
+	}
+	if cy.Subscribers == nil || len(cy.Subscribers) != 0 {
+		t.Errorf("cycle new subscribers = %#v, want empty non-nil", cy.Subscribers)
+	}
 
-	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001", "--json")
+	out, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour", "--json")
 	if err != nil {
 		t.Fatalf("work bet: %v", err)
 	}
@@ -377,7 +426,7 @@ func TestCyclesCycleAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	for _, want := range []string{"Current cycle: C-0001", "Backlog:", "Pitched:", "Shelved:", "W-0001"} {
+	for _, want := range []string{"Current cycle: C-0001", "Backlog:", "Pitched:", "Shelved:", "W-0001-arash-jafarpour"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q; got:\n%s", want, out)
 		}
@@ -413,11 +462,18 @@ func TestCyclesCycleAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cycle show --json: %v", err)
 	}
-	if got := decodeJSON[cycles.Cycle](t, out); got.ID != "C-0001" || len(got.Bets) != 1 {
-		t.Errorf("cycle show --json = %+v", got)
+	shown := decodeJSON[cycles.Cycle](t, out)
+	if shown.ID != "C-0001" || len(shown.Bets) != 1 {
+		t.Errorf("cycle show --json = %+v", shown)
+	}
+	if shown.CreatedBy != cmdOwnerHandle {
+		t.Errorf("cycle show --json created_by = %q, want %q", shown.CreatedBy, cmdOwnerHandle)
+	}
+	if shown.Subscribers == nil {
+		t.Errorf("cycle show --json subscribers = nil, want []")
 	}
 
-	// close: human default, then board has no current and W-0001 is Shelved.
+	// close: human default, then board has no current and W-0001-arash-jafarpour is Shelved.
 	out, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "close")
 	if err != nil {
 		t.Fatalf("cycle close: %v", err)
@@ -433,7 +489,7 @@ func TestCyclesCycleAndStatus(t *testing.T) {
 	if board.Current != nil {
 		t.Errorf("board.Current after close = %+v, want nil", board.Current)
 	}
-	if len(board.Backlog.Shelved) != 1 || board.Backlog.Shelved[0].ID != "W-0001" {
+	if len(board.Backlog.Shelved) != 1 || board.Backlog.Shelved[0].ID != "W-0001-arash-jafarpour" {
 		t.Errorf("shelved after close = %+v", board.Backlog.Shelved)
 	}
 
@@ -474,7 +530,7 @@ func TestCyclesExitCodes(t *testing.T) {
 
 	// A shaped item, but no open cycle → bet is a state_conflict (7).
 	mustCyclesWork(t, env.cfgPath, "No cycle yet", "app")
-	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001")
+	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "bet", "W-0001-arash-jafarpour")
 	wantCode(t, err, exit.StateConflict)
 
 	// Uninitialized vault → not_initialized (11).
@@ -488,6 +544,75 @@ func TestCyclesExitCodes(t *testing.T) {
 
 	// Invalid date at cycle new → preflight_failed (6).
 	_, _, err = runCycles(t, env.cfgPath, "cycles", "cycle", "new", "Goal", "--release", "0.3.0", "--start", "10-2026")
+	wantCode(t, err, exit.PreflightFailed)
+}
+
+// TestCyclesWorkHelpNamesCompositeID pins acceptance #6: every id-taking work
+// verb documents the owner-namespaced `W-####-<owner-slug>` form.
+func TestCyclesWorkHelpNamesCompositeID(t *testing.T) {
+	env := setupCyclesCmd(t)
+	for _, args := range [][]string{
+		{"cycles", "work", "--help"},
+		{"cycles", "work", "shape", "--help"},
+		{"cycles", "work", "bet", "--help"},
+		{"cycles", "work", "deliver", "--help"},
+		{"cycles", "work", "show", "--help"},
+		{"cycles", "work", "sync", "--help"},
+	} {
+		out, _, err := runCycles(t, env.cfgPath, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !strings.Contains(out, "<W-####-<owner-slug>>") {
+			t.Errorf("%v help missing the composite-id placeholder; got:\n%s", args, out)
+		}
+	}
+}
+
+// legacyWorkNote is a minimal pre-v2 bare-id work note.
+const legacyWorkNote = `---
+id: W-0042
+title: "Legacy note"
+scope: old
+status: Backlog
+appetite:
+cycle:
+project:
+provider:
+repo:
+issue:
+milestone:
+neocortex-issue:
+history: []
+created: 2026-01-01T00:00:00Z
+registry-version: 0.1.0
+---
+
+# W-0042 — Legacy note
+`
+
+// TestCyclesWorkShowLegacyID pins the read-compatibility requirement: a bare
+// legacy W-#### still resolves through the CLI verbs.
+func TestCyclesWorkShowLegacyID(t *testing.T) {
+	env := setupCyclesCmd(t)
+	legacy := filepath.Join(env.vault, "Cycles", "backlog", "W-0042 - legacy.md")
+	if err := fsutil.AtomicWrite(legacy, []byte(legacyWorkNote), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runCycles(t, env.cfgPath, "cycles", "work", "show", "W-0042", "--json")
+	if err != nil {
+		t.Fatalf("work show legacy: %v", err)
+	}
+	item := decodeJSON[cycles.WorkItem](t, out)
+	if item.ID != "W-0042" || item.Title != "Legacy note" {
+		t.Errorf("legacy show = %+v", item)
+	}
+	if item.Owner != "" {
+		t.Errorf("legacy note owner = %q, want empty", item.Owner)
+	}
+
+	// A bare id still rejects the malformed case with preflight_failed (6).
+	_, _, err = runCycles(t, env.cfgPath, "cycles", "work", "show", "W-X")
 	wantCode(t, err, exit.PreflightFailed)
 }
 

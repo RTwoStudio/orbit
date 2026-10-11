@@ -11,59 +11,111 @@ import (
 	"github.com/RTwoStudio/orbit/internal/exit"
 )
 
-// workIDRe is the canonical work-id grammar: W- followed by 4+ digits. The
-// capture group carries the numeric part for workIDNum.
-var workIDRe = regexp.MustCompile(`^W-(\d{4,})$`)
+// compositeWorkIDRe is the canonical owner-namespaced work-id grammar:
+//
+//	W-<seq>-<owner-slug>
+//
+// where <seq> is four or more digits and <owner-slug> is the creator's stable
+// roster handle ([a-z0-9] words joined by '-'). The capture groups carry the
+// numeric sequence and the owner handle.
+var compositeWorkIDRe = regexp.MustCompile(`^W-(\d{4,})-([a-z0-9]+(?:-[a-z0-9]+)*)$`)
 
-// ParseWorkID validates and returns a canonical W-#### id. Anything else is a
-// preflight_failed (6).
+// legacyWorkIDRe is the pre-v2 bare grammar (`W-####`). It is accepted
+// READ-ONLY so an un-migrated vault keeps resolving; the CLI never mints one.
+var legacyWorkIDRe = regexp.MustCompile(`^W-(\d{4,})$`)
+
+// isWorkID reports whether tok is a canonical composite id or a legacy bare id.
+func isWorkID(tok string) bool {
+	return compositeWorkIDRe.MatchString(tok) || legacyWorkIDRe.MatchString(tok)
+}
+
+// workIDSplit decomposes a composite or legacy work id into its sequence and
+// owner handle. A legacy id yields an empty owner; anything malformed yields
+// ok=false.
+func workIDSplit(id string) (seq int, owner string, ok bool) {
+	id = strings.TrimSpace(id)
+	if m := compositeWorkIDRe.FindStringSubmatch(id); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return 0, "", false
+		}
+		return n, m[2], true
+	}
+	if m := legacyWorkIDRe.FindStringSubmatch(id); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return 0, "", false
+		}
+		return n, "", true
+	}
+	return 0, "", false
+}
+
+// workIDNum extracts the numeric sequence of a composite or legacy work id.
+func workIDNum(id string) (int, bool) {
+	seq, _, ok := workIDSplit(id)
+	return seq, ok
+}
+
+// workIDOwner extracts the owner handle of a composite work id; a legacy bare
+// id yields "".
+func workIDOwner(id string) string {
+	_, owner, _ := workIDSplit(id)
+	return owner
+}
+
+// ParseWorkID validates and returns a canonical work id: the composite
+// `W-<seq>-<owner-slug>` form, or a legacy bare `W-####` (read-compat).
+// Anything else is a preflight_failed (6).
 func ParseWorkID(id string) (string, error) {
 	s := strings.TrimSpace(id)
-	if !workIDRe.MatchString(s) {
+	if !isWorkID(s) {
 		return "", exit.New(exit.PreflightFailed,
-			fmt.Sprintf("invalid work id %q — syntax: W-#### (W- followed by four or more digits)", id))
+			fmt.Sprintf("invalid work id %q — syntax: W-<seq>-<owner-slug> (e.g. W-0001-arash-jafarpour); a legacy bare W-#### still resolves", id))
 	}
 	return s, nil
 }
 
-// workIDNum extracts the numeric part of a canonical W-#### id.
-func workIDNum(id string) (int, bool) {
-	m := workIDRe.FindStringSubmatch(id)
-	if m == nil {
-		return 0, false
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// workIDFromFilename extracts a note filename's leading ID token, e.g.
-// "W-0001 - voice-search.md" → "W-0001", "W-0002.md" → "W-0002".
+// workIDFromFilename extracts a note filename's leading ID token by splitting
+// on the FIRST ` - ` delimiter (the slug alphabet is [a-z0-9-], so the
+// space-padded delimiter can never appear inside a slug):
+//
+//	"W-0001-arash-jafarpour - voice-search.md" → "W-0001-arash-jafarpour"
+//	"W-0001 - voice-search.md"                 → "W-0001" (legacy)
+//	"W-0002.md"                                → "W-0002"
 func workIDFromFilename(name string) string {
 	base := strings.TrimSuffix(name, ".md")
-	if i := strings.IndexByte(base, ' '); i >= 0 {
-		base = base[:i]
+	if i := strings.Index(base, " - "); i >= 0 {
+		return base[:i]
 	}
 	return base
 }
 
-// NextWorkID returns the next free W-#### id: max over backlog/ and every
-// cycles/C-*/ directory, plus one, zero-padded to at least four digits. It is
-// monotonic and never reuses an id (delivered items stay on disk).
-func (s *Store) NextWorkID() (string, error) {
+// NextWorkID returns the next free composite id for owner: max over that
+// owner's ids across backlog/ and every cycles/C-*/ directory, plus one,
+// zero-padded to at least four digits. Only the allocating owner's namespace is
+// scanned, so two developers minting offline never collide on merge. Legacy
+// bare ids carry no owner and never advance a per-owner sequence.
+func (s *Store) NextWorkID(owner string) (string, error) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "", exit.New(exit.PreflightFailed, "work owner handle must not be empty")
+	}
 	files, err := s.workFiles()
 	if err != nil {
 		return "", exit.Wrap(exit.IOError, err, "cannot scan cycles dirs")
 	}
 	max := 0
 	for _, p := range files {
-		if n, ok := workIDNum(workIDFromFilename(filepath.Base(p))); ok && n > max {
+		tok := workIDFromFilename(filepath.Base(p))
+		if workIDOwner(tok) != owner {
+			continue
+		}
+		if n, ok := workIDNum(tok); ok && n > max {
 			max = n
 		}
 	}
-	return fmt.Sprintf("W-%04d", max+1), nil
+	return fmt.Sprintf("W-%04d-%s", max+1, owner), nil
 }
 
 // cycleIDRe is the canonical cycle-id grammar: C- followed by 4+ digits. The
